@@ -2,7 +2,7 @@
 
 A modern, privacy-focused, pure-Rust web browser built on top of the [Servo](https://servo.org/) rendering engine.
 
-CraftBrowsing is designed for users who want total independence from Chromium and Gecko, with native adblocking, multi-account container tabs, progressive web app (PWA) support, customizable UI theming, developer tools, and an optional, zero-knowledge local sync engine.
+CraftBrowsing is designed for users who want total independence from Chromium and Gecko, with native adblocking, multi-account container tabs, progressive web app (PWA) support, a built-in download manager, customizable UI theming, developer tools, and an optional, zero-knowledge local sync engine.
 
 ---
 
@@ -12,6 +12,7 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline.
 - **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
 - **Progressive Web Apps (PWAs):** Install web apps into standalone, chromeless windows with native OS shortcuts, full adblocking, and container isolation.
+- **Built-in Download Manager:** Pause/resume support via HTTP Range requests, container-aware cookie/proxy routing, streaming disk writes (`.part`), and executable safety prompts.
 - **Local Self-Hosted Sync (Disabled by Default):** Complete user privacy out of the box. Zero network sync broadcasts or background listeners until explicitly turned on by the user. Supports E2EE local mDNS sync and optional self-hosted relays for bookmarks, history, tabs, containers, adblock filter lists, and installed PWAs.
 - **Built-in Developer Tools:** In-process DOM/CSS inspector, interactive JS console, network waterfall monitor, and remote debugging protocol (CDP).
 - **WebExtensions & UI Customization:** Firefox-like plugin architecture and customizable UI chrome.
@@ -24,6 +25,7 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - [Architecture Overview](docs/architecture.md)
 - [Containers Specification](docs/containers.md)
 - [Progressive Web Apps (PWA)](docs/pwa.md)
+- [Download Manager](docs/downloads.md)
 - [Local Sync Engine](docs/sync.md)
 - [Web Developer Tools](docs/devtools.md)
 - [Plugin System & Extensions](docs/plugin-system.md)
@@ -38,6 +40,7 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - [ ] Implement declarative browser chrome with tabs and address bar in `craft-app`.
 - [ ] Hook `craft-adblock` into the network request interception pipeline.
 - [ ] Introduce containerized cookie & storage isolation (`docs/containers.md`).
+- [ ] Build basic download manager with pause/resume and container context (`docs/downloads.md`).
 
 ### Phase 2: Developer Experience, PWAs & Sync
 - [ ] Build in-process Web Developer Tools panel (`docs/devtools.md`).
