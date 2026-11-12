@@ -54,7 +54,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [x] Local SQLite storage layer for bookmarks, history, tabs, and user-selected search engines (`craft-storage`).
 - [x] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
 - [x] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle.
-- [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
+- [x] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
 - [x] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
 - [ ] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
 - [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
@@ -102,7 +102,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [ ] **WebExtensions Sandbox & Extension Runtime (`docs/plugin-system.md`):**
   - [ ] Manifest v2/v3 parser and sandboxed JavaScript runtime (Boa Engine / Deno Core).
   - [ ] Firefox-compatible extension APIs (`tabs`, `storage`, `contextualIdentities`, `webRequest`).
-  - [ ] External password manager Native Messaging IPC bridge (Bitwarden, 1Password, KeePassXC).
+  - [ ] External password manager Native Messaging IPC bridge (Bitwarden, 1Password, KeePalXC).
 - [ ] **Advanced Security Hardening:**
   - [ ] Anti-fingerprinting defenses (canvas blunting, audio context jitter, font enumeration shielding).
   - [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector with zero-log presets (Quad9, Mullvad).
