@@ -14,6 +14,7 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - **Local Self-Hosted Sync (Disabled by Default):** Complete user privacy out of the box. Zero network sync broadcasts or background listeners until explicitly turned on by the user. Supports E2EE local mDNS sync and optional self-hosted relays.
 - **WebExtensions & UI Customization:** Firefox-like plugin architecture and customizable UI chrome.
 - **External Password Manager Integration:** Zero-knowledge credential handling delegating directly to Bitwarden, 1Password, or KeePassXC via standard native messaging.
+- **Built-in Web Developer Tools:** Native DOM/CSS inspector, network traffic monitor, JS console, and storage viewer.
 
 ---
 
@@ -24,6 +25,8 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - [Local Sync Engine](docs/sync.md)
 - [Plugin System & Extensions](docs/plugin-system.md)
 - [Passwords & Security](docs/passwords-and-security.md)
+- [Web Developer Tools](docs/devtools.md)
+- [Project Roadmap](docs/roadmap.md)
 
 ---
 
