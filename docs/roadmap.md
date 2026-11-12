@@ -50,7 +50,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [x] Embed Servo runtime with WebRender surface compositor in `craft-engine`.
 - [x] Implement declarative browser chrome with horizontal and vertical tabs layout engine in `craft-app` (`docs/tabs-and-groups.md`).
 - [x] Tab Grouping, color-coded clusters, and direct Multi-Account Container binding.
-- [ ] Session restore engine and memory hibernation / tab discarding for inactive tabs.
+- [x] Session restore engine and memory hibernation / tab discarding for inactive tabs.
 - [ ] Local SQLite storage layer for bookmarks, history, tabs, and user-selected search engines (`craft-storage`).
 - [ ] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
 - [x] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle.
