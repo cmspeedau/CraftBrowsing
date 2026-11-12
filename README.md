@@ -6,6 +6,22 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 
 ---
 
+## Security & Privacy: Mission Critical Foundation
+
+In CraftBrowsing, security and privacy are not optional secondary features—they form the core foundation of every architectural boundary:
+
+- **Zero-Telemetry & Local Defaults:** No phone-home diagnostics, metrics, or default network probes.
+- **Pure-Rust Memory Safety:** Rendered via Servo and WebRender, eliminating entire classes of memory safety bugs (use-after-free, buffer overflows).
+- **Process Isolation & OS Sandboxing:** Worker threads, rendering surfaces, and extension runtimes operate in isolated sandboxes.
+- **Strict Anti-Fingerprinting:** Standardized canvas readback noise, WebGL uniform blunting, AudioContext jitter, and user-agent normalization.
+- **HTTPS-First & Encrypted DNS:** Strict HTTPS enforcement with configurable DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT).
+- **Zero-Knowledge Architecture:** No native cloud credential storage; external password managers (Bitwarden, 1Password, KeePassXC) handle keys via Native Messaging.
+- **Zero-Broadcast Local Sync:** Completely dormant until explicitly turned on by the user; encrypted end-to-end via ChaCha20-Poly1305 and X25519.
+
+For full architectural details, see [docs/security-and-privacy.md](docs/security-and-privacy.md).
+
+---
+
 ## Key Highlights
 
 - **Pure Rust Engine:** Powered by Servo and WebRender for fast, memory-safe layout and parallel rendering.
@@ -23,6 +39,7 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 
 ## Documentation
 
+- [Security & Privacy Architecture](docs/security-and-privacy.md)
 - [Architecture Overview](docs/architecture.md)
 - [Containers Specification](docs/containers.md)
 - [Progressive Web Apps (PWA)](docs/pwa.md)
@@ -31,7 +48,8 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - [Local Sync Engine](docs/sync.md)
 - [Web Developer Tools](docs/devtools.md)
 - [Plugin System & Extensions](docs/plugin-system.md)
-- [Passwords & Security](docs/passwords-and-security.md)
+- [Passwords & External Manager Integration](docs/passwords.md)
+- [Roadmap](docs/roadmap.md)
 
 ---
 
