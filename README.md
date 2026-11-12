@@ -6,26 +6,27 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 
 ---
 
-## Security & Privacy: Mission Critical Foundation
+## Security & Privacy: Mission Critical & User-Controlled
 
-In CraftBrowsing, security and privacy are not optional secondary features—they form the core foundation of every architectural boundary:
+In CraftBrowsing, security and privacy are not optional secondary features—they form the core foundation of every architectural boundary, **with granular user enable/disable control over every feature**:
 
+- **User Sovereignty & Granular Toggles (`craft://settings/privacy`):** Every single privacy protection (ad/tracker blocking, anti-fingerprinting, HTTPS-Only, DoH, containers, hardware device access) can be individually toggled on/off globally or overridden on a per-site / per-container basis.
 - **Zero-Telemetry & Local Defaults:** No phone-home diagnostics, metrics, or default network probes.
 - **Pure-Rust Memory Safety:** Rendered via Servo and WebRender, eliminating entire classes of memory safety bugs (use-after-free, buffer overflows).
 - **Process Isolation & OS Sandboxing:** Worker threads, rendering surfaces, and extension runtimes operate in isolated sandboxes.
-- **Strict Anti-Fingerprinting:** Standardized canvas readback noise, WebGL uniform blunting, AudioContext jitter, and user-agent normalization.
-- **HTTPS-First & Encrypted DNS:** Strict HTTPS enforcement with configurable DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT).
+- **Configurable Anti-Fingerprinting:** Standardized canvas readback noise, WebGL uniform blunting, AudioContext jitter, and user-agent normalization (all with user disable options for web app compatibility).
+- **HTTPS-First & Encrypted DNS:** Strict HTTPS enforcement with configurable DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) and custom resolver support.
 - **Zero-Knowledge Architecture:** No native cloud credential storage; external password managers (Bitwarden, 1Password, KeePassXC) handle keys via Native Messaging.
-- **Zero-Broadcast Local Sync:** Completely dormant until explicitly turned on by the user; encrypted end-to-end via ChaCha20-Poly1305 and X25519.
+- **Zero-Broadcast Local Sync (Off by Default):** Completely dormant until explicitly turned on by the user; encrypted end-to-end via ChaCha20-Poly1305 and X25519.
 
-For full architectural details, see [docs/security-and-privacy.md](docs/security-and-privacy.md).
+For full architectural details and the settings matrix, see [docs/security-and-privacy.md](docs/security-and-privacy.md).
 
 ---
 
 ## Key Highlights
 
 - **Pure Rust Engine:** Powered by Servo and WebRender for fast, memory-safe layout and parallel rendering.
-- **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline.
+- **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline (with per-site shield toggle).
 - **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
 - **Progressive Web Apps (PWAs):** Install web apps into standalone, chromeless windows with native OS shortcuts, full adblocking, and container isolation.
 - **Built-in Download Manager:** Pause/resume support via HTTP Range requests, container-aware cookie/proxy routing, streaming disk writes (`.part`), and executable safety prompts.
@@ -39,7 +40,7 @@ For full architectural details, see [docs/security-and-privacy.md](docs/security
 
 ## Documentation
 
-- [Security & Privacy Architecture](docs/security-and-privacy.md)
+- [Security & Privacy Architecture & User Toggles](docs/security-and-privacy.md)
 - [Architecture Overview](docs/architecture.md)
 - [Containers Specification](docs/containers.md)
 - [Progressive Web Apps (PWA)](docs/pwa.md)
@@ -60,10 +61,11 @@ For full architectural details, see [docs/security-and-privacy.md](docs/security
 - [ ] Implement declarative browser chrome with tabs, address bar (Omnibox), and search keyword shortcuts in `craft-app`.
 - [ ] Build session restore engine and tab hibernation / memory discarding for inactive tabs.
 - [ ] Implement Private Browsing mode with ephemeral memory-backed storage.
-- [ ] Hook `craft-adblock` into the network request interception pipeline.
+- [ ] Hook `craft-adblock` into the network request interception pipeline with address bar quick-toggle.
 - [ ] Introduce containerized cookie & storage isolation (`docs/containers.md`).
 - [ ] Build basic download manager with pause/resume and container context (`docs/downloads.md`).
 - [ ] Unified Site Permissions prompt manager (camera, microphone, notifications, clipboard).
+- [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable switches.
 
 ### Phase 2: Media, Hardware Flashing, DevTools & Sync
 - [ ] Build in-process Web Developer Tools panel (`docs/devtools.md`).
@@ -79,7 +81,7 @@ For full architectural details, see [docs/security-and-privacy.md](docs/security
 - [ ] WebExtensions runtime supporting Manifest v2/v3 APIs (`docs/plugin-system.md`).
 - [ ] Native messaging bridge for external password managers (Bitwarden, KeePassXC).
 - [ ] Community theming and customizable UI layouts (including vertical tabs).
-- [ ] Anti-fingerprinting protections (canvas blunting, audio context jitter, referrer trimming).
+- [ ] Anti-fingerprinting protections (canvas blunting, audio context jitter, referrer trimming) with per-site exceptions.
 - [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector.
 
 ---
