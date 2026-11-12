@@ -261,7 +261,7 @@ impl VerticalTabManager {
         self.groups.push(TabGroup {
             id: group_id.clone(),
             name: name.into(),
-            color_hex: color.into_string_value(color_hex),
+            color_hex: color_hex.into(),
             bound_container,
             collapsed: false,
         });
