@@ -51,7 +51,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [x] Implement declarative browser chrome with horizontal and vertical tabs layout engine in `craft-app` (`docs/tabs-and-groups.md`).
 - [x] Tab Grouping, color-coded clusters, and direct Multi-Account Container binding.
 - [x] Session restore engine and memory hibernation / tab discarding for inactive tabs.
-- [ ] Local SQLite storage layer for bookmarks, history, tabs, and user-selected search engines (`craft-storage`).
+- [x] Local SQLite storage layer for bookmarks, history, tabs, and user-selected search engines (`craft-storage`).
 - [ ] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
 - [x] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle.
 - [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
