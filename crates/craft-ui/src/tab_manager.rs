@@ -245,35 +245,195 @@ impl VerticalTabManager {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Tab Grouping & Multi-Account Container Binding
+    // -----------------------------------------------------------------------
+
+    /// Create a new color-coded tab group, optionally bound to a container.
+    /// Returns the generated group ID.
+    pub fn create_group(
+        &mut self,
+        name: impl Into<String>,
+        color_hex: impl Into<String>,
+        bound_container: Option<ContainerId>,
+    ) -> TabGroupId {
+        let group_id = TabGroupId(format!("group-{}", self.groups.len() + 1));
+        self.groups.push(TabGroup {
+            id: group_id.clone(),
+            name: name.into(),
+            color_hex: color.into_string_value(color_hex),
+            bound_container,
+            collapsed: false,
+        });
+        group_id
+    }
+
+    /// Delete a group and unassign all of its member tabs.
+    pub fn remove_group(&mut self, group_id: &TabGroupId) {
+        for node in self.nodes.iter_mut() {
+            if node.group_id.as_ref() == Some(group_id) {
+                node.group_id = None;
+            }
+        }
+        self.groups.retain(|g| &g.id != group_id);
+    }
+
+    /// Rename a group.
+    pub fn rename_group(&mut self, group_id: &TabGroupId, name: impl Into<String>) -> bool {
+        match self.groups.iter_mut().find(|g| &g.id == group_id) {
+            Some(group) => {
+                group.name = name.into();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Assign a tab to a group. If the group is bound to a container, the tab's
+    /// container is re-bound to match (Multi-Account Container inheritance).
+    pub fn assign_tab_to_group(&mut self, tab_id: &TabId, group_id: &TabGroupId) -> bool {
+        let bound_container = self
+            .groups
+            .iter()
+            .find(|g| &g.id == group_id)
+            .and_then(|g| g.bound_container.clone());
+
+        if bound_container.is_none() && !self.groups.iter().any(|g| &g.id == group_id) {
+            return false;
+        }
+
+        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
+            node.group_id = Some(group_id.clone());
+            if let Some(container) = bound_container {
+                node.container_id = container;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a tab from its group (container binding is preserved).
+    pub fn unassign_tab_from_group(&mut self, tab_id: &TabId) -> bool {
+        match self.nodes.iter_mut().find(|n| &n.id == tab_id) {
+            Some(node) => {
+                node.group_id = None;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Bind (or rebind) a group to a container. When `enforce_members` is true,
+    /// every member tab's container is updated to the bound container.
+    pub fn bind_group_to_container(
+        &mut self,
+        group_id: &TabGroupId,
+        container_id: Option<ContainerId>,
+        enforce_members: bool,
+    ) -> bool {
+        let Some(group) = self.groups.iter_mut().find(|g| &g.id == group_id) else {
+            return false;
+        };
+        group.bound_container = container_id.clone();
+
+        if enforce_members {
+            if let Some(container) = container_id {
+                for node in self.nodes.iter_mut() {
+                    if node.group_id.as_ref() == Some(group_id) {
+                        node.container_id = container.clone();
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Toggle a group's collapsed state, hiding its member tabs from the sidebar.
+    pub fn toggle_group_collapse(&mut self, group_id: &TabGroupId) -> bool {
+        match self.groups.iter_mut().find(|g| &g.id == group_id) {
+            Some(group) => {
+                group.collapsed = !group.collapsed;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Retrieve the group a tab currently belongs to, if any.
+    pub fn get_group_for_tab(&self, tab_id: &TabId) -> Option<&TabGroup> {
+        let group_id = self.nodes.iter().find(|n| &n.id == tab_id)?.group_id.clone()?;
+        self.groups.iter().find(|g| g.id == group_id)
+    }
+
+    /// Retrieve all member tab IDs of a group in tree order.
+    pub fn get_tabs_in_group(&self, group_id: &TabGroupId) -> Vec<TabId> {
+        self.nodes
+            .iter()
+            .filter(|n| n.group_id.as_ref() == Some(group_id))
+            .map(|n| n.id.clone())
+            .collect()
+    }
+
+    /// Retrieve all groups bound to a given container.
+    pub fn get_groups_for_container(&self, container_id: &ContainerId) -> Vec<&TabGroup> {
+        self.groups
+            .iter()
+            .filter(|g| g.bound_container.as_ref() == Some(container_id))
+            .collect()
+    }
+
     /// Retrieve flat display items in visual tree order (with indentation levels).
+    /// Tabs belonging to a collapsed group are omitted from the output.
     pub fn get_render_tree(&self) -> Vec<VisualTabItem> {
+        let collapsed_groups: Vec<_> = self
+            .groups
+            .iter()
+            .filter(|g| g.collapsed)
+            .map(|g| g.id.clone())
+            .collect();
+
         let mut visual_items = Vec::new();
         let root_tabs: Vec<_> = self.nodes.iter().filter(|n| n.parent_tab_id.is_none()).collect();
 
         for root in root_tabs {
-            self.collect_visual_nodes(root, 0, &mut visual_items);
+            self.collect_visual_nodes(root, 0, &collapsed_groups, &mut visual_items);
         }
 
         visual_items
     }
 
-    fn collect_visual_nodes(&self, node: &TabNode, depth: usize, out: &mut Vec<VisualTabItem>) {
-        out.push(VisualTabItem {
-            tab_id: node.id.clone(),
-            title: node.title.clone(),
-            url: node.url.clone(),
-            container_id: node.container_id.clone(),
-            depth,
-            is_active: node.is_active,
-            is_hibernated: node.state == TabState::Hibernated,
-            has_children: !node.child_tab_ids.is_empty(),
-            is_collapsed: node.is_collapsed,
-        });
+    fn collect_visual_nodes(
+        &self,
+        node: &TabNode,
+        depth: usize,
+        collapsed_groups: &[TabGroupId],
+        out: &mut Vec<VisualTabItem>,
+    ) {
+        let group_hidden = node
+            .group_id
+            .as_ref()
+            .map_or(false, |gid| collapsed_groups.contains(gid));
+
+        if !group_hidden {
+            out.push(VisualTabItem {
+                tab_id: node.id.clone(),
+                title: node.title.clone(),
+                url: node.url.clone(),
+                container_id: node.container_id.clone(),
+                group_id: node.group_id.clone(),
+                depth,
+                is_active: node.is_active,
+                is_hibernated: node.state == TabState::Hibernated,
+                has_children: !node.child_tab_ids.is_empty(),
+                is_collapsed: node.is_collapsed,
+            });
+        }
 
         if !node.is_collapsed {
             for child_id in &node.child_tab_ids {
                 if let Some(child_node) = self.nodes.iter().find(|n| &n.id == child_id) {
-                    self.collect_visual_nodes(child_node, depth + 1, out);
+                    self.collect_visual_nodes(child_node, depth + 1, collapsed_groups, out);
                 }
             }
         }
@@ -287,6 +447,7 @@ pub struct VisualTabItem {
     pub title: String,
     pub url: String,
     pub container_id: ContainerId,
+    pub group_id: Option<TabGroupId>,
     pub depth: usize,
     pub is_active: bool,
     pub is_hibernated: bool,
@@ -357,5 +518,100 @@ mod tests {
         manager.wake_tab(&t1);
         let node = manager.get_node(&t1).unwrap();
         assert_eq!(node.state, TabState::Ready);
+    }
+
+    #[test]
+    fn test_create_group_and_assign_tab_with_container_binding() {
+        let mut manager = VerticalTabManager::new();
+        let t1 = TabId("t1".into());
+        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+
+        // Create a group bound to the Work container
+        let group = manager.create_group(
+            "Work Research",
+            "#5385a6",
+            Some(ContainerId::new(ContainerId::WORK)),
+        );
+
+        // Assigning the tab re-binds it to the group's container
+        assert!(manager.assign_tab_to_group(&t1, &group));
+        let node = manager.get_node(&t1).unwrap();
+        assert_eq!(node.group_id, Some(group.clone()));
+        assert_eq!(node.container_id, ContainerId::new(ContainerId::WORK));
+
+        let group_obj = manager.get_group_for_tab(&t1).unwrap();
+        assert_eq!(group_obj.name, "Work Research");
+        assert_eq!(manager.get_tabs_in_group(&group), vec![t1.clone()]);
+    }
+
+    #[test]
+    fn test_group_collapse_hides_members() {
+        let mut manager = VerticalTabManager::new();
+        let t1 = TabId("t1".into());
+        let t2 = TabId("t2".into());
+        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+        manager.insert_tab(t2.clone(), None, ContainerId::default_container(), "https://example.org");
+
+        let group = manager.create_group("Shopping", "#ef9d69", None);
+        manager.assign_tab_to_group(&t2, &group);
+
+        assert_eq!(manager.get_render_tree().len(), 2);
+
+        manager.toggle_group_collapse(&group);
+        let tree = manager.get_render_tree();
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].tab_id, t1);
+
+        manager.toggle_group_collapse(&group);
+        assert_eq!(manager.get_render_tree().len(), 2);
+    }
+
+    #[test]
+    fn test_bind_group_to_container_enforces_members() {
+        let mut manager = VerticalTabManager::new();
+        let t1 = TabId("t1".into());
+        let t2 = TabId("t2".into());
+        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+        manager.insert_tab(t2.clone(), None, ContainerId::default_container(), "https://example.org");
+
+        let group = manager.create_group("Banking", "#a45b41", None);
+        manager.assign_tab_to_group(&t1, &group);
+
+        // Rebind to Banking container and enforce on existing members
+        assert!(manager.bind_group_to_container(
+            &group,
+            Some(ContainerId::new(ContainerId::BANKING)),
+            true
+        ));
+        assert_eq!(
+            manager.get_node(&t1).unwrap().container_id,
+            ContainerId::new(ContainerId::BANKING)
+        );
+        // Non-member tabs untouched
+        assert_eq!(
+            manager.get_node(&t2).unwrap().container_id,
+            ContainerId::default_container()
+        );
+
+        assert_eq!(
+            manager
+                .get_groups_for_container(&ContainerId::new(ContainerId::BANKING))
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_remove_group_unassigns_members() {
+        let mut manager = VerticalTabManager::new();
+        let t1 = TabId("t1".into());
+        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+
+        let group = manager.create_group("Temp", "#000000", None);
+        manager.assign_tab_to_group(&t1, &group);
+        manager.remove_group(&group);
+
+        assert!(manager.groups.is_empty());
+        assert_eq!(manager.get_node(&t1).unwrap().group_id, None);
     }
 }
