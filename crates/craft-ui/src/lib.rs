@@ -1,5 +1,7 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
+pub mod window;
+
 use craft_adblock::AdblockManager;
 use craft_core::container::{Container, ContainerId};
 use craft_core::tab::{Tab, TabGroup, TabId};
@@ -9,6 +11,8 @@ use craft_sync::protocol::SyncPreferences;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
+
+pub use window::{BrowserWindowApp, WindowConfig};
 
 pub struct BrowserApp {
     pub adblock: Arc<AdblockManager>,
