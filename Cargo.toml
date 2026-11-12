@@ -13,6 +13,7 @@ members = [
     "crates/craft-core",
     "crates/craft-engine",
     "crates/craft-ui",
+    "crates/craft-storage",
     "crates/craft-adblock",
     "crates/craft-sync",
     "crates/craft-plugins",
