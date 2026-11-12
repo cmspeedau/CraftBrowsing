@@ -1,0 +1,13 @@
+[package]
+name = "craft-engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+craft-core = { path = "../craft-core" }
+craft-adblock = { path = "../craft-adblock" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+winit = { workspace = true }
