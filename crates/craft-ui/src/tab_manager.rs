@@ -4,9 +4,18 @@ use craft_core::container::ContainerId;
 use craft_core::tab::{Tab, TabGroup, TabGroupId, TabId};
 use serde::{Deserialize, Serialize};
 
+/// Represents the lifecycle state of a tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TabState {
+    Active,
+    Loading,
+    Ready,
+    Hibernated,
+}
+
 /// Represents a node within the vertical tab hierarchy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TabTreeNode {
+pub struct TabNode {
     pub id: TabId,
     pub title: String,
     pub url: String,
@@ -15,11 +24,26 @@ pub struct TabTreeNode {
     pub child_tab_ids: Vec<TabId>,
     pub group_id: Option<TabGroupId>,
     pub is_active: bool,
-    pub is_hibernated: bool,
+    pub state: TabState,
     pub is_collapsed: bool,
 }
 
-impl TabTreeNode {
+impl TabNode {
+    pub fn new(id: TabId, parent_tab_id: Option<TabId>, container_id: ContainerId, url: &str) -> Self {
+        Self {
+            id,
+            title: url.to_string(),
+            url: url.to_string(),
+            container_id,
+            parent_tab_id,
+            child_tab_ids: Vec::new(),
+            group_id: None,
+            is_active: false,
+            state: TabState::Ready,
+            is_collapsed: false,
+        }
+    }
+
     pub fn from_tab(tab: &Tab, is_active: bool) -> Self {
         Self {
             id: tab.id.clone(),
@@ -30,7 +54,7 @@ impl TabTreeNode {
             child_tab_ids: Vec::new(),
             group_id: tab.group_id.clone(),
             is_active,
-            is_hibernated: false,
+            state: if is_active { TabState::Active } else { TabState::Ready },
             is_collapsed: false,
         }
     }
@@ -39,7 +63,7 @@ impl TabTreeNode {
 /// Vertical tab tree manager handling layout, nesting, and tab state.
 #[derive(Debug, Clone, Default)]
 pub struct VerticalTabManager {
-    pub nodes: Vec<TabTreeNode>,
+    pub nodes: Vec<TabNode>,
     pub groups: Vec<TabGroup>,
     pub active_tab_id: Option<TabId>,
 }
@@ -53,6 +77,88 @@ impl VerticalTabManager {
         }
     }
 
+    /// Insert a newly created tab into the tree.
+    pub fn insert_tab(
+        &mut self,
+        tab_id: TabId,
+        parent_id: Option<TabId>,
+        container_id: ContainerId,
+        url: &str,
+    ) {
+        let mut node = TabNode::new(tab_id.clone(), parent_id.clone(), container_id, url);
+        node.is_active = true;
+        node.state = TabState::Active;
+
+        // Reset other active statuses
+        for n in self.nodes.iter_mut() {
+            if n.is_active {
+                n.is_active = false;
+                if n.state == TabState::Active {
+                    n.state = TabState::Ready;
+                }
+            }
+        }
+
+        if let Some(ref pid) = parent_id {
+            if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
+                if !parent.child_tab_ids.contains(&tab_id) {
+                    parent.child_tab_ids.push(tab_id.clone());
+                }
+            }
+        }
+
+        self.active_tab_id = Some(tab_id);
+        self.nodes.push(node);
+    }
+
+    /// Update URL and title of a tab node.
+    pub fn update_tab_url(&mut self, tab_id: &TabId, url: &str) {
+        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
+            node.url = url.to_string();
+            if node.title.is_empty() || node.title == node.url {
+                node.title = url.to_string();
+            }
+        }
+    }
+
+    /// Update title of a tab node.
+    pub fn update_tab_title(&mut self, tab_id: &TabId, title: &str) {
+        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
+            node.title = title.to_string();
+        }
+    }
+
+    /// Remove a tab and reparent or orphan child tabs cleanly.
+    pub fn remove_tab(&mut self, tab_id: &TabId) {
+        let parent_id = self.nodes.iter().find(|n| &n.id == tab_id).and_then(|n| n.parent_tab_id.clone());
+
+        // Remove from parent's children list
+        if let Some(ref pid) = parent_id {
+            if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
+                parent.child_tab_ids.retain(|c| c != tab_id);
+            }
+        }
+
+        // Reparent children to the removed tab's parent
+        for node in self.nodes.iter_mut() {
+            if node.parent_tab_id.as_ref() == Some(tab_id) {
+                node.parent_tab_id = parent_id.clone();
+                if let Some(ref pid) = parent_id {
+                    if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
+                        if !parent.child_tab_ids.contains(&node.id) {
+                            parent.child_tab_ids.push(node.id.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        self.nodes.retain(|n| &n.id != tab_id);
+        if self.active_tab_id.as_ref() == Some(tab_id) {
+            self.active_tab_id = self.nodes.last().map(|n| n.id.clone());
+        }
+    }
+
     /// Sync the vertical tab tree from the flat tab list in BrowserApp.
     pub fn sync_from_tabs(&mut self, tabs: &[Tab], active_tab: Option<&TabId>) {
         self.active_tab_id = active_tab.cloned();
@@ -60,7 +166,7 @@ impl VerticalTabManager {
 
         for tab in tabs {
             let is_active = active_tab.map_or(false, |a| a == &tab.id);
-            let mut node = TabTreeNode::from_tab(tab, is_active);
+            let mut node = TabNode::from_tab(tab, is_active);
 
             // Populate child tab ids
             node.child_tab_ids = tabs
@@ -112,7 +218,7 @@ impl VerticalTabManager {
     pub fn hibernate_tab(&mut self, tab_id: &TabId) {
         if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
             if !node.is_active {
-                node.is_hibernated = true;
+                node.state = TabState::Hibernated;
             }
         }
     }
@@ -120,7 +226,9 @@ impl VerticalTabManager {
     /// Wake up a hibernated tab upon selection.
     pub fn wake_tab(&mut self, tab_id: &TabId) {
         if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
-            node.is_hibernated = false;
+            if node.state == TabState::Hibernated {
+                node.state = TabState::Ready;
+            }
         }
     }
 
@@ -136,7 +244,7 @@ impl VerticalTabManager {
         visual_items
     }
 
-    fn collect_visual_nodes(&self, node: &TabTreeNode, depth: usize, out: &mut Vec<VisualTabItem>) {
+    fn collect_visual_nodes(&self, node: &TabNode, depth: usize, out: &mut Vec<VisualTabItem>) {
         out.push(VisualTabItem {
             tab_id: node.id.clone(),
             title: node.title.clone(),
@@ -144,7 +252,7 @@ impl VerticalTabManager {
             container_id: node.container_id.clone(),
             depth,
             is_active: node.is_active,
-            is_hibernated: node.is_hibernated,
+            is_hibernated: node.state == TabState::Hibernated,
             has_children: !node.child_tab_ids.is_empty(),
             is_collapsed: node.is_collapsed,
         });
@@ -197,5 +305,25 @@ mod tests {
         let collapsed_tree = manager.get_render_tree();
         assert_eq!(collapsed_tree.len(), 1);
         assert_eq!(collapsed_tree[0].tab_id, TabId("t1".into()));
+    }
+
+    #[test]
+    fn test_insert_and_remove_tab() {
+        let mut manager = VerticalTabManager::new();
+        let t1 = TabId("t1".into());
+        let t2 = TabId("t2".into());
+
+        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+        manager.insert_tab(t2.clone(), Some(t1.clone()), ContainerId::default_container(), "https://example.org");
+
+        assert_eq!(manager.nodes.len(), 2);
+        let items = manager.get_render_tree();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].depth, 1);
+
+        manager.remove_tab(&t1);
+        assert_eq!(manager.nodes.len(), 1);
+        assert_eq!(manager.nodes[0].id, t2);
+        assert!(manager.nodes[0].parent_tab_id.is_none());
     }
 }
