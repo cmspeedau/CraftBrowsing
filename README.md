@@ -2,7 +2,7 @@
 
 A modern, privacy-focused, pure-Rust web browser built on top of the [Servo](https://servo.org/) rendering engine.
 
-CraftBrowsing is designed for users who want total independence from Chromium and Gecko, with native adblocking, multi-account container tabs, progressive web app (PWA) support, a built-in download manager, customizable UI theming, developer tools, hardware flashing access (WebSerial/WebUSB), and an optional, zero-knowledge local sync engine.
+CraftBrowsing is designed for users who want total independence from Chromium and Gecko, with native adblocking, multi-account container tabs, progressive web app (PWA) support, a built-in download manager, customizable UI theming, developer tools, hardware flashing access (WebSerial/WebUSB), vertical tabs & tab grouping, local RSS reader, encrypted portable vault backups, global media controls with PiP scrubber, and an optional, zero-knowledge local sync engine.
 
 ---
 
@@ -29,10 +29,14 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 - **Cross-Platform Releases & Auto-Update:** Native builds for Windows (with silent background auto-updates), macOS (universal notarized `.dmg` with in-app updater), and Linux (**AppImage with `zsync` delta updates**).
 - **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline (with per-site shield toggle).
 - **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
+- **Tab Groups & Vertical Tabs:** Color-coded collapsible groups, container auto-binding, and idle memory hibernation (`docs/tabs-and-groups.md`).
+- **Global Media Hub & PiP Scrubber:** Central toolbar popup for background media playback with timeline scrubbers and mute toggles (`docs/media-hub.md`).
+- **Local RSS/Atom Feed Reader (`craft://feeds`):** In-browser feed subscription, full-text offline caching, zero cloud dependencies (`docs/rss-reader.md`).
+- **Encrypted Vault Export & Portable Mode:** Password-encrypted `.craftvault` export (ChaCha20-Poly1305) and zero-footprint `--portable` execution from USB drives (`docs/backup-and-portability.md`).
 - **Progressive Web Apps (PWAs):** Install web apps into standalone, chromeless windows with native OS shortcuts, full adblocking, and container isolation.
 - **Built-in Download Manager:** Pause/resume support via HTTP Range requests, container-aware cookie/proxy routing, streaming disk writes (`.part`), and executable safety prompts.
 - **Hardware Flashing & Device Access (WebSerial / WebUSB / WebHID):** Opt-in, zero-trust hardware access allowing browser-based MCU flashing (ESP32, Arduino, WebDFU, QMK) with explicit permission prompts, container scoping, and instant disconnect killswitches.
-- **Local Self-Hosted Sync (Disabled by Default):** Complete user privacy out of the box. Zero network sync broadcasts or background listeners until explicitly turned on by the user. Supports E2EE local mDNS sync and optional self-hosted relays for bookmarks, history, tabs, containers, adblock filter lists, and installed PWAs.
+- **Local Self-Hosted Sync (Disabled by Default):** Complete user privacy out of the box. Zero network sync broadcasts or background listeners until explicitly turned on by the user. Supports E2EE local mDNS sync and optional self-hosted relays for bookmarks, history, tabs, containers, adblock filter lists, installed PWAs, and RSS feeds.
 - **Built-in Developer Tools:** In-process DOM/CSS inspector, interactive JS console, network waterfall monitor, and remote debugging protocol (CDP).
 - **WebExtensions & UI Customization:** Firefox-like plugin architecture and customizable UI chrome.
 - **External Password Manager Integration:** Zero-knowledge credential handling delegating directly to Bitwarden, 1Password, or KeePassXC via standard native messaging.
@@ -43,6 +47,10 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 
 - [Project Roadmap & Release Schedule](docs/roadmap.md) *(Authoritative Source of Truth)*
 - [Packaging, Distribution & Auto-Update Architecture](docs/releases-and-packaging.md)
+- [Tab Management, Groups & Vertical Tabs](docs/tabs-and-groups.md)
+- [Local RSS/Atom Feed Reader](docs/rss-reader.md)
+- [Backup, Encrypted Vault Export & Portability](docs/backup-and-portability.md)
+- [Global Media Hub & Picture-in-Picture](docs/media-hub.md)
 - [Security & Privacy Architecture & User Toggles](docs/security-and-privacy.md)
 - [Architecture Overview](docs/architecture.md)
 - [Containers Specification](docs/containers.md)
