@@ -1,23 +1,26 @@
 //! # craft-storage
 //!
 //! Local SQLite storage layer for CraftBrowsing covering bookmarks, browsing
-//! history, persisted tabs/sessions, user-selected search engines, and the
-//! container-aware download manager.
+//! history, persisted tabs/sessions, user-selected search engines, the
+//! container-aware download manager, and Firefox-style Multi-Account
+//! Containers partitioning (cookie jars, origin storage, cache).
 //!
 //! The layer is schema-versioned and migrated transactionally, supports
 //! file-backed profiles as well as memory-only databases (`:memory:`) for the
 //! ephemeral Private Browsing mode (`PrivateSession`).
 
+pub mod containers;
 pub mod downloads;
 
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
+pub use containers::{CacheEntry, Container, CookieEntry, OriginEntry};
 pub use downloads::{DownloadRecord, DownloadState, DownloadStore};
 
 /// Current schema version. Bump and add a migration arm in [`Storage::migrate`]
 /// when the layout changes.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// A user bookmark.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -190,6 +193,51 @@ impl Storage {
                  COMMIT;",
             )?;
         }
+
+        // v2: Multi-Account Containers — partitioned cookie jars, origin
+        // storage, and cache keyed by UserContextId (`container_id`, where
+        // NULL means the default jar).
+        if current.unwrap_or(0) < 2 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE containers (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     name TEXT NOT NULL,
+                     color_hex TEXT NOT NULL DEFAULT '#4a90d9',
+                     icon TEXT NOT NULL DEFAULT 'fingerprint',
+                     created_at_epoch_ms INTEGER NOT NULL
+                 );
+                 CREATE TABLE cookies (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     container_id INTEGER,
+                     domain TEXT NOT NULL,
+                     name TEXT NOT NULL,
+                     value TEXT NOT NULL,
+                     created_at_epoch_ms INTEGER NOT NULL,
+                     UNIQUE (container_id, domain, name)
+                 );
+                 CREATE INDEX idx_cookies_jar ON cookies(container_id, domain);
+                 CREATE TABLE origin_storage (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     container_id INTEGER,
+                     origin TEXT NOT NULL,
+                     key TEXT NOT NULL,
+                     value TEXT NOT NULL,
+                     UNIQUE (container_id, origin, key)
+                 );
+                 CREATE INDEX idx_origin_partition ON origin_storage(container_id, origin);
+                 CREATE TABLE cache_entries (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     container_id INTEGER,
+                     url TEXT NOT NULL,
+                     size_bytes INTEGER NOT NULL DEFAULT 0,
+                     cached_at_epoch_ms INTEGER NOT NULL
+                 );
+                 CREATE INDEX idx_cache_partition ON cache_entries(container_id);
+                 INSERT INTO schema_version(version) VALUES (2);
+                 COMMIT;",
+            )?;
+        }
         Ok(())
     }
 
@@ -203,7 +251,11 @@ impl Storage {
     /// Hard purge of every user-data row (used when a private session ends).
     pub fn purge_all(&self) -> SqlResult<()> {
         self.conn.execute_batch(
-            "DELETE FROM tabs;
+            "DELETE FROM cache_entries;
+             DELETE FROM origin_storage;
+             DELETE FROM cookies;
+             DELETE FROM containers;
+             DELETE FROM tabs;
              DELETE FROM tab_groups;
              DELETE FROM sessions;
              DELETE FROM history;
