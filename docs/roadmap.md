@@ -19,7 +19,7 @@ CraftBrowsing is a next-generation, highly customizable web browser built on Ser
 - [x] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle.
 - [x] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
 - [x] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
-- [ ] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
+- [x] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
 - [x] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
 - [ ] CI/CD release matrix for Windows (`.exe`/`.msix`), macOS (`.dmg`), and Linux AppImage with `zsync` (`docs/releases-and-packaging.md`).
 
