@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 craft-core = { path = "../craft-core" }
+craft-engine = { path = "../craft-engine" }
 craft-adblock = { path = "../craft-adblock" }
 craft-sync = { path = "../craft-sync" }
 craft-plugins = { path = "../craft-plugins" }
