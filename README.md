@@ -12,7 +12,7 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline.
 - **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
 - **Progressive Web Apps (PWAs):** Install web apps into standalone, chromeless windows with native OS shortcuts, full adblocking, and container isolation.
-- **Local Self-Hosted Sync (Disabled by Default):** Complete user privacy out of the box. Zero network sync broadcasts or background listeners until explicitly turned on by the user. Supports E2EE local mDNS sync and optional self-hosted relays for bookmarks, history, tabs, containers, and adblock filter lists.
+- **Local Self-Hosted Sync (Disabled by Default):** Complete user privacy out of the box. Zero network sync broadcasts or background listeners until explicitly turned on by the user. Supports E2EE local mDNS sync and optional self-hosted relays for bookmarks, history, tabs, containers, adblock filter lists, and installed PWAs.
 - **Built-in Developer Tools:** In-process DOM/CSS inspector, interactive JS console, network waterfall monitor, and remote debugging protocol (CDP).
 - **WebExtensions & UI Customization:** Firefox-like plugin architecture and customizable UI chrome.
 - **External Password Manager Integration:** Zero-knowledge credential handling delegating directly to Bitwarden, 1Password, or KeePassXC via standard native messaging.
@@ -43,7 +43,7 @@ CraftBrowsing is designed for users who want total independence from Chromium an
 - [ ] Build in-process Web Developer Tools panel (`docs/devtools.md`).
 - [ ] Add Chrome DevTools Protocol (CDP) WebSocket listener for remote debugging.
 - [ ] Implement Progressive Web App (PWA) installation and standalone windows (`docs/pwa.md`).
-- [ ] Implement opt-in peer-to-peer sync for bookmarks, history, containers, and block lists (`docs/sync.md`).
+- [ ] Implement opt-in peer-to-peer sync for bookmarks, history, containers, block lists, and PWAs (`docs/sync.md`).
 
 ### Phase 3: Ecosystem & Extensibility
 - [ ] WebExtensions runtime supporting Manifest v2/v3 APIs (`docs/plugin-system.md`).
