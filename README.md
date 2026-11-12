@@ -1,42 +1,37 @@
 # CraftBrowsing
 
-A modern, highly customizable, pure-Rust web browser built on Servo, featuring native ad-blocking, local self-hosted sync, and a Firefox-style extension & theming system.
+A modern, privacy-focused, pure-Rust web browser built on top of the [Servo](https://servo.org/) rendering engine.
+
+CraftBrowsing is designed for users who want total independence from Chromium and Gecko, with native adblocking, multi-account container tabs, customizable UI theming, and an optional, zero-knowledge local sync engine.
 
 ---
 
-## Key Pillars
+## Key Highlights
 
-1. **Pure Rust Core:** Rendering powered by Servo (`servoshell` / `webrender`) with a responsive native UI (Iced / Slint).
-2. **Built-in Ad-Blocking:** Native request-interception engine powered by `adblock` (Brave's pure-Rust engine), supporting standard EasyList & uBlock filter lists.
-3. **Local Self-Hosted Sync:** End-to-end encrypted synchronization for bookmarks, history, and tabs using local protocols (mDNS / WebSockets) or self-hosted relays (no central telemetry).
-4. **Firefox-Style Extension & Theming System:**
-   - Manifest-based declarative extensions (`manifest.json`).
-   - WebExtensions API compatibility layer (`browser.tabs`, `browser.storage`, `browser.bookmarks`).
-   - `userChrome.css` and `userContent.css` support for complete browser UI customization.
-5. **External Password Manager Integration:** Delegation to Bitwarden, 1Password, and KeePassXC via WebExtension content scripts and Native Messaging (`browser.runtime.connectNative`).
+- **Pure Rust Engine:** Powered by Servo and WebRender for fast, memory-safe layout and parallel rendering.
+- **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline.
+- **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
+- **Local Self-Hosted Sync (Disabled by Default):** Complete user privacy out of the box. Zero network sync broadcasts or background listeners until explicitly turned on by the user. Supports E2EE local mDNS sync and optional self-hosted relays.
+- **WebExtensions & UI Customization:** Firefox-like plugin architecture and customizable UI chrome.
+- **External Password Manager Integration:** Zero-knowledge credential handling delegating directly to Bitwarden, 1Password, or KeePassXC via standard native messaging.
 
 ---
 
 ## Documentation
 
 - [Architecture Overview](docs/architecture.md)
-- [Plugin & WebExtensions System](docs/plugin-system.md)
-- [Password Manager Integration](docs/passwords.md)
-- [Local Sync Protocol](docs/sync.md)
-- [Project Roadmap](docs/roadmap.md)
+- [Containers Specification](docs/containers.md)
+- [Local Sync Engine](docs/sync.md)
+- [Plugin System & Extensions](docs/plugin-system.md)
+- [Passwords & Security](docs/passwords-and-security.md)
 
 ---
 
-## Getting Started (Planned)
+## Rust Toolchain
+
+CraftBrowsing targets the latest stable Rust release:
 
 ```bash
-# Clone the repository
-git clone https://github.com/cmspeedau/CraftBrowsing.git
-cd CraftBrowsing
-
-# Build with Cargo
-cargo build --release
-
-# Run CraftBrowsing
-cargo run --release
+rustup update stable
+cargo build
 ```
