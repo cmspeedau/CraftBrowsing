@@ -1,47 +1,10 @@
-# CraftBrowsing Project Roadmap & Release Schedule
+# CraftBrowsing Project Roadmap
 
-This document serves as the **authoritative single source of truth** for CraftBrowsing's engineering milestones, feature specifications, version control schema, packaging targets, and release track lifecycle.
+A privacy-first browser built on Servo, designed to put user control first.
 
----
+## Vision
 
-## 1. Version Control & Release Strategy
-
-CraftBrowsing strictly adheres to **Semantic Versioning (SemVer 2.0.0)** formatted as `vMAJOR.MINOR.PATCH`:
-
-- **MAJOR (`X.0.0`):** Breaking engine architecture shifts, major IPC protocol breaks, or fundamental storage migrations.
-- **MINOR (`0.X.0`):** New functional capabilities, new browser subsystems, or expanded Web platform APIs.
-- **PATCH (`0.0.X`):** Memory safety fixes, critical security advisories, filter-list engine performance patches, and bug fixes.
-
-### Release Channels
-
-| Channel | Target Audience | Branch / Git Tag | Update Cycle |
-| :--- | :--- | :--- | :--- |
-| **Nightly** | Active contributors & core engine testers | `main` | Continuous rolling builds |
-| **Beta** | Community testers & plugin developers | `beta` (`vX.Y.0-beta.N`) | Bi-weekly freeze & QA |
-| **Stable** | General production end-users | `release` (`vX.Y.Z`) | Monthly scheduled releases & zero-day hotfixes |
-
----
-
-## 2. Multi-Platform Packaging & Auto-Update Engine
-
-Full architectural details for packaging, binary delta updates, and code signing are specified in [`docs/releases-and-packaging.md`](releases-and-packaging.md).
-
-- **Windows (`x86_64` / `aarch64`):**
-  - Native installer (`.exe` NSIS / `.msix`).
-  - Background auto-update service with stage-and-swap on restart.
-  - Authenticode code signing & Ed25519 payload verification.
-- **macOS (`Universal`: Apple Silicon & Intel):**
-  - Notarized `.dmg` / `.app` bundle with Apple Hardened Runtime.
-  - In-app auto-updater with Ed25519 manifest verification and atomic bundle replacement.
-- **Linux (`x86_64` / `aarch64`):**
-  - Standalone portable **AppImage** bundle.
-  - **`zsync` block-level differential updates** downloading only modified byte ranges (reducing ~120 MB updates down to 5–15 MB).
-  - Embedded `X-AppImage-UpdateInformation` metadata for direct desktop integration.
-- **Privacy & User Sovereignty:**
-  - Auto-updates can be set to Automatic, Notify Only, or Completely Disabled (`craft://settings/updates`).
-  - Zero-telemetry update checks (static manifest requests without unique hardware or user IDs).
-
----
+CraftBrowsing is a next-generation, highly customizable web browser built on Servo. It prioritizes performance, privacy, and user sovereignty, offering a modern browsing experience with advanced features like Multi-Account Containers, integrated adblocking, and local-first data management.
 
 ## 3. Release Milestones & Phase Tracking
 
@@ -57,7 +20,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [x] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
 - [x] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
 - [ ] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
-- [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
+- [x] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
 - [ ] CI/CD release matrix for Windows (`.exe`/`.msix`), macOS (`.dmg`), and Linux AppImage with `zsync` (`docs/releases-and-packaging.md`).
 
 ### v0.2.0 — Phase 2: Developer Tools, Media Hub, PWAs & Hardware Flashing
@@ -107,14 +70,3 @@ Full architectural details for packaging, binary delta updates, and code signing
   - [ ] Anti-fingerprinting defenses (canvas blunting, audio context jitter, font enumeration shielding).
   - [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector with zero-log presets (Quad9, Mullvad).
 - [ ] In-browser auto-update background worker integration for Windows, macOS, and Linux AppImage zsync.
-
----
-
-## 4. Maintenance & Change Log Conventions
-
-All architectural revisions, feature additions, and milestone completions must be recorded in git history using [Conventional Commits](https://www.conventionalcommits.org/):
-
-- `feat(subsystem):` New user-facing or architectural capability.
-- `fix(subsystem):` Bug, memory, or security patch.
-- `docs(spec):` Updates to specifications, roadmap, or documentation.
-- `sec(perimeter):` Critical security boundary or sandboxing enhancement.
