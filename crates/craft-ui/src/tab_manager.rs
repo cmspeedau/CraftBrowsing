@@ -1,4 +1,5 @@
-//! Vertical tab manager with hierarchical tree nesting, grouping, and container indicators.
+//! Vertical tab manager with hierarchical tree nesting, grouping, container indicators,
+//! session restore, and idle tab discarding.
 
 use craft_core::container::ContainerId;
 use craft_core::tab::{Tab, TabGroup, TabGroupId, TabId};
@@ -26,6 +27,8 @@ pub struct TabNode {
     pub is_active: bool,
     pub state: TabState,
     pub is_collapsed: bool,
+    pub pinned: bool,
+    pub last_active_epoch_ms: u64,
 }
 
 /// Backward compatibility alias
@@ -44,6 +47,8 @@ impl TabNode {
             is_active: false,
             state: TabState::Ready,
             is_collapsed: false,
+            pinned: false,
+            last_active_epoch_ms: 0,
         }
     }
 
@@ -59,6 +64,8 @@ impl TabNode {
             is_active,
             state: if is_active { TabState::Active } else { TabState::Ready },
             is_collapsed: false,
+            pinned: tab.pinned,
+            last_active_epoch_ms: tab.last_active_epoch_ms,
         }
     }
 }
@@ -69,6 +76,8 @@ pub struct VerticalTabManager {
     pub nodes: Vec<TabNode>,
     pub groups: Vec<TabGroup>,
     pub active_tab_id: Option<TabId>,
+    /// Idle threshold (ms) after which inactive background tabs are discarded.
+    pub idle_discard_threshold_ms: u64,
 }
 
 impl VerticalTabManager {
@@ -77,6 +86,7 @@ impl VerticalTabManager {
             nodes: Vec::new(),
             groups: Vec::new(),
             active_tab_id: None,
+            idle_discard_threshold_ms: DEFAULT_IDLE_DISCARD_THRESHOLD_MS,
         }
     }
 
@@ -101,6 +111,7 @@ impl VerticalTabManager {
         let mut node = TabNode::new(tab_id.clone(), parent_id.clone(), container_id, url);
         node.is_active = true;
         node.state = TabState::Active;
+        node.last_active_epoch_ms = now_epoch_ms();
 
         // Reset other active statuses
         for n in self.nodes.iter_mut() {
@@ -243,6 +254,80 @@ impl VerticalTabManager {
                 node.state = TabState::Ready;
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Session Restore & Idle Tab Discarding
+    // -----------------------------------------------------------------------
+
+    /// Capture a serializable snapshot of the current session (tab tree, groups,
+    /// active tab, scroll positions via titles/URLs) for crash-safe restore.
+    pub fn snapshot_session(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            tabs: self.nodes.clone(),
+            groups: self.groups.clone(),
+            active_tab_id: self.active_tab_id.clone(),
+        }
+    }
+
+    /// Restore a previously captured session snapshot, replacing current state.
+    /// The previously active tab is preserved; if it no longer exists, the last
+    /// tab in tree order becomes active.
+    pub fn restore_session(&mut self, snapshot: SessionSnapshot) {
+        let active_exists = snapshot
+            .active_tab_id
+            .as_ref()
+            .map(|a| snapshot.tabs.iter().any(|n| &n.id == a))
+            .unwrap_or(false);
+
+        self.nodes = snapshot.tabs;
+        self.groups = snapshot.groups;
+        self.active_tab_id = if active_exists {
+            snapshot.active_tab_id
+        } else {
+            self.nodes.last().map(|n| n.id.clone())
+        };
+    }
+
+    /// Serialize the session snapshot to JSON for persistence to disk.
+    pub fn serialize_session(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&self.snapshot_session())
+    }
+
+    /// Deserialize a session snapshot from JSON and restore it.
+    pub fn deserialize_and_restore_session(&mut self, json: &str) -> Result<(), serde_json::Error> {
+        let snapshot: SessionSnapshot = serde_json::from_str(json)?;
+        self.restore_session(snapshot);
+        Ok(())
+    }
+
+    /// Record activity on a tab, refreshing its idle timer.
+    pub fn touch_tab(&mut self, tab_id: &TabId) {
+        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
+            node.last_active_epoch_ms = now_epoch_ms();
+        }
+    }
+
+    /// Hibernate every inactive, non-pinned background tab whose idle time
+    /// (measured against `now_epoch_ms`) exceeds the discard threshold.
+    /// Returns the IDs of tabs that were discarded.
+    pub fn discard_idle_tabs(&mut self, now_epoch_ms: u64) -> Vec<TabId> {
+        let threshold = self.idle_discard_threshold_ms;
+        let mut discarded = Vec::new();
+
+        for node in self.nodes.iter_mut() {
+            let is_idle = now_epoch_ms.saturating_sub(node.last_active_epoch_ms) >= threshold;
+            if !node.is_active
+                && !node.pinned
+                && node.state == TabState::Ready
+                && is_idle
+            {
+                node.state = TabState::Hibernated;
+                discarded.push(node.id.clone());
+            }
+        }
+
+        discarded
     }
 
     // -----------------------------------------------------------------------
@@ -440,6 +525,27 @@ impl VerticalTabManager {
     }
 }
 
+/// Default idle discard threshold: 30 minutes.
+pub const DEFAULT_IDLE_DISCARD_THRESHOLD_MS: u64 = 30 * 60 * 1000;
+
+/// Monotonic-ish wall-clock timestamp in milliseconds. Tests inject explicit
+/// timestamps into `discard_idle_tabs`, so this is only used for live tracking.
+pub fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// A serializable snapshot of the entire browser session, used for crash-safe
+/// session restore across restarts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSnapshot {
+    pub tabs: Vec<TabNode>,
+    pub groups: Vec<TabGroup>,
+    pub active_tab_id: Option<TabId>,
+}
+
 /// A flattened representation of a tab node formatted for visual rendering in the vertical sidebar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisualTabItem {
@@ -613,5 +719,85 @@ mod tests {
 
         assert!(manager.groups.is_empty());
         assert_eq!(manager.get_node(&t1).unwrap().group_id, None);
+    }
+
+    #[test]
+    fn test_session_snapshot_and_restore() {
+        let mut manager = VerticalTabManager::new();
+        manager.insert_tab(TabId("t1".into()), None, ContainerId::default_container(), "https://example.com");
+        manager.insert_tab(TabId("t2".into()), None, ContainerId::new(ContainerId::WORK), "https://example.org");
+        let group = manager.create_group("Work", "#5385a6", Some(ContainerId::new(ContainerId::WORK)));
+        manager.assign_tab_to_group(&TabId("t2".into()), &group);
+
+        let snapshot = manager.snapshot_session();
+        let json = serde_json::to_string(&snapshot).unwrap();
+
+        // Simulate a fresh launch
+        let mut restored = VerticalTabManager::new();
+        restored.deserialize_and_restore_session(&json).unwrap();
+
+        assert_eq!(restored.nodes.len(), 2);
+        assert_eq!(restored.groups.len(), 1);
+        assert_eq!(restored.active_tab_id, Some(TabId("t2".into())));
+        assert_eq!(
+            restored.get_node(&TabId("t2".into())).unwrap().container_id,
+            ContainerId::new(ContainerId::WORK)
+        );
+        assert_eq!(restored.get_tabs_in_group(&group), vec![TabId("t2".into())]);
+    }
+
+    #[test]
+    fn test_restore_falls_back_when_active_tab_missing() {
+        let mut snapshot = SessionSnapshot {
+            tabs: vec![TabNode::new(TabId("t1".into()), None, ContainerId::default_container(), "https://example.com")],
+            groups: Vec::new(),
+            active_tab_id: Some(TabId("gone".into())),
+        };
+        snapshot.tabs[0].last_active_epoch_ms = 100;
+
+        let mut manager = VerticalTabManager::new();
+        manager.restore_session(snapshot);
+
+        assert_eq!(manager.active_tab_id, Some(TabId("t1".into())));
+    }
+
+    #[test]
+    fn test_discard_idle_tabs_policy() {
+        let mut manager = VerticalTabManager::new();
+        manager.insert_tab(TabId("active".into()), None, ContainerId::default_container(), "https://a.com");
+        manager.insert_tab(TabId("fresh".into()), None, ContainerId::default_container(), "https://b.com");
+        manager.insert_tab(TabId("stale".into()), None, ContainerId::default_container(), "https://c.com");
+        manager.insert_tab(TabId("pinned".into()), None, ContainerId::default_container(), "https://d.com");
+
+        // Only "active" stays active (insert_tab marks each new tab active; reset manually)
+        if let Some(n) = manager.get_node_mut(&TabId("active".into())) {
+            n.is_active = true;
+        }
+        for id in ["fresh", "stale", "pinned"] {
+            if let Some(n) = manager.get_node_mut(&TabId(id.into())) {
+                n.is_active = false;
+                n.state = TabState::Ready;
+            }
+        }
+        if let Some(n) = manager.get_node_mut(&TabId("pinned".into())) {
+            n.pinned = true;
+        }
+
+        let now = now_epoch_ms();
+        // fresh: touched now; stale: idle > 30min
+        manager.touch_tab(&TabId("fresh".into()));
+        if let Some(n) = manager.get_node_mut(&TabId("stale".into())) {
+            n.last_active_epoch_ms = now.saturating_sub(DEFAULT_IDLE_DISCARD_THRESHOLD_MS + 1);
+        }
+        if let Some(n) = manager.get_node_mut(&TabId("pinned".into())) {
+            n.last_active_epoch_ms = now.saturating_sub(DEFAULT_IDLE_DISCARD_THRESHOLD_MS + 1);
+        }
+
+        let discarded = manager.discard_idle_tabs(now);
+        assert_eq!(discarded, vec![TabId("stale".into())]);
+        assert_eq!(manager.get_node(&TabId("stale".into())).unwrap().state, TabState::Hibernated);
+        assert_eq!(manager.get_node(&TabId("fresh".into())).unwrap().state, TabState::Ready);
+        assert_eq!(manager.get_node(&TabId("pinned".into())).unwrap().state, TabState::Ready);
+        assert_eq!(manager.get_node(&TabId("active".into())).unwrap().state, TabState::Active);
     }
 }
