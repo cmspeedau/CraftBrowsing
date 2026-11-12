@@ -17,6 +17,7 @@ members = [
     "crates/craft-adblock",
     "crates/craft-sync",
     "crates/craft-plugins",
+    "crates/craft-downloads",
 ]
 
 [workspace.dependencies]
@@ -28,6 +29,8 @@ serde_json = "1.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
 chacha20poly1305 = "0.10"
 argon2 = "0.5"
-deno_core = "0.300"
+den_core = "0.300"
 adblock = "0.9"
 winit = "0.30"
+dirs = "5"
+thiserror = "2"
