@@ -1,14 +1,19 @@
 //! # craft-storage
 //!
 //! Local SQLite storage layer for CraftBrowsing covering bookmarks, browsing
-//! history, persisted tabs/sessions, and user-selected search engines.
+//! history, persisted tabs/sessions, user-selected search engines, and the
+//! container-aware download manager.
 //!
 //! The layer is schema-versioned and migrated transactionally, supports
 //! file-backed profiles as well as memory-only databases (`:memory:`) for the
 //! ephemeral Private Browsing mode (`PrivateSession`).
 
+pub mod downloads;
+
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
+
+pub use downloads::{DownloadRecord, DownloadState, DownloadStore};
 
 /// Current schema version. Bump and add a migration arm in [`Storage::migrate`]
 /// when the layout changes.
