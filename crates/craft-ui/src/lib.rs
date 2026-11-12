@@ -2,6 +2,7 @@
 
 pub mod window;
 pub mod omnibox;
+pub mod tab_manager;
 
 use craft_adblock::AdblockManager;
 use craft_core::container::{Container, ContainerId};
@@ -15,6 +16,7 @@ use tracing::info;
 
 pub use window::{BrowserWindowApp, run_window_event_loop};
 pub use omnibox::{Omnibox, OmniboxAction, OmniboxState, SearchEngine};
+pub use tab_manager::{VerticalTabManager, TabNode, TabState};
 
 pub struct BrowserApp {
     pub adblock: Arc<AdblockManager>,
@@ -27,6 +29,7 @@ pub struct BrowserApp {
     pub engine: ServoEngine,
     pub cmd_sender: mpsc::UnboundedSender<EngineCommand>,
     pub omnibox: Omnibox,
+    pub tab_manager: VerticalTabManager,
 }
 
 impl BrowserApp {
@@ -37,6 +40,7 @@ impl BrowserApp {
         let sync_preferences = SyncPreferences::default();
         let plugin_runtime = PluginRuntime::new();
         let omnibox = Omnibox::default();
+        let tab_manager = VerticalTabManager::new();
 
         let (engine, cmd_sender) = ServoEngine::new(adblock.clone());
 
@@ -51,6 +55,7 @@ impl BrowserApp {
             engine,
             cmd_sender,
             omnibox,
+            tab_manager,
         }
     }
 
@@ -59,9 +64,14 @@ impl BrowserApp {
         let tab = Tab::new(tab_id.clone(), url, container_id.clone());
         self.tabs.push(tab);
 
+        // Register in tree-style VerticalTabManager
+        let parent_id = self.active_tab_id.clone();
+        self.tab_manager.insert_tab(tab_id.clone(), parent_id, container_id.clone(), url);
+
         // Spawn a corresponding Servo browser context partitioned by container
         self.engine.create_context(tab_id.clone(), container_id, url);
         self.active_tab_id = Some(tab_id.clone());
+        self.tab_manager.active_tab_id = Some(tab_id.clone());
         self.omnibox.set_text(url);
         tab_id
     }
@@ -70,6 +80,7 @@ impl BrowserApp {
         if let Some(tab) = self.tabs.iter_mut().find(|t| &t.id == tab_id) {
             tab.navigate(url);
         }
+        self.tab_manager.update_tab_url(tab_id, url);
         self.engine.navigate(tab_id, url);
         if self.active_tab_id.as_ref() == Some(tab_id) {
             self.omnibox.set_text(url);
@@ -96,6 +107,7 @@ impl BrowserApp {
         if let Some(tab) = self.tabs.iter().find(|t| &t.id == tab_id) {
             self.omnibox.set_text(&tab.url);
             self.active_tab_id = Some(tab_id.clone());
+            self.tab_manager.active_tab_id = Some(tab_id.clone());
         }
     }
 
@@ -104,8 +116,11 @@ impl BrowserApp {
             tab_id: tab_id.clone(),
         });
         self.tabs.retain(|t| &t.id != tab_id);
+        self.tab_manager.remove_tab(tab_id);
+
         if self.active_tab_id.as_ref() == Some(tab_id) {
             self.active_tab_id = self.tabs.last().map(|t| t.id.clone());
+            self.tab_manager.active_tab_id = self.active_tab_id.clone();
             if let Some(active_id) = &self.active_tab_id {
                 if let Some(tab) = self.tabs.iter().find(|t| &t.id == active_id) {
                     self.omnibox.set_text(&tab.url);
@@ -123,6 +138,7 @@ impl BrowserApp {
                 if self.active_tab_id.as_ref() == Some(&nav.tab_id) {
                     self.omnibox.set_text(&nav.url);
                 }
+                self.tab_manager.update_tab_url(&nav.tab_id, &nav.url);
             }
         }
         events
