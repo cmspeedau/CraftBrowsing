@@ -11,6 +11,7 @@
 
 pub mod containers;
 pub mod downloads;
+pub mod permissions;
 pub mod privacy_settings;
 
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
@@ -18,11 +19,12 @@ use serde::{Deserialize, Serialize};
 
 pub use containers::{CacheEntry, Container, CookieEntry, OriginEntry};
 pub use downloads::{DownloadRecord, DownloadState, DownloadStore};
+pub use permissions::{PermissionType, PermissionValue, SitePermission};
 pub use privacy_settings::{ClearDataOptions, ClearDataResult, PrivacySettings};
 
 /// Current schema version. Bump and add a migration arm in [`Storage::migrate`]
 /// when the layout changes.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// A user bookmark.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,9 +53,7 @@ pub struct StoredTab {
     pub session_id: i64,
     pub url: String,
     pub title: String,
-    /// Parent tab id for tree restoration; `None` for roots.
     pub parent_tab_id: Option<i64>,
-    /// Sibling order index for deterministic tree reconstruction.
     pub position: i64,
     pub pinned: bool,
     pub hibernated: bool,
@@ -62,12 +62,11 @@ pub struct StoredTab {
     pub last_active_epoch_ms: i64,
 }
 
-/// A user-configured search engine selectable from the address bar.
+/// A configurable search engine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchEngine {
     pub id: i64,
     pub name: String,
-    /// URL template containing a `{searchTerms}` placeholder.
     pub query_template: String,
     pub is_default: bool,
     pub position: i64,
@@ -79,27 +78,23 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Open (or create) a file-backed profile database and run migrations.
+    /// Open a file-backed profile database.
     pub fn open(path: &str) -> SqlResult<Self> {
         Self::from_connection(Connection::open(path)?)
     }
 
-    /// Open an ephemeral, memory-only database (Private Browsing mode).
+    /// Open an in-memory profile database.
     pub fn open_in_memory() -> SqlResult<Self> {
         Self::from_connection(Connection::open_in_memory()?)
     }
 
-    /// Open a hardened, memory-only Private Browsing database.
+    /// Open an isolated memory-only private session database.
     ///
     /// Guarantees:
-    /// - Every byte lives in RAM: SQLite never touches a disk file.
-    /// - `journal_mode = MEMORY` — no rollback journal is written anywhere.
-    /// - `locking_mode = EXCLUSIVE` — the private store cannot be attached to
-    ///   by any other connection for the lifetime of the session.
-    /// - `secure_delete = ON` — purged rows are overwritten in place before
+    /// - SQLite never creates a database file on disk.
+    /// - Journal data is kept in memory.
+    /// - `secure_delete` is enabled so purged rows are overwritten before
     ///   the memory is released.
-    ///
-    /// Pair with [`PrivateSession`] so the store is fully purged on drop.
     pub fn open_private() -> SqlResult<Self> {
         let storage = Self::open_in_memory()?;
         storage.conn.execute_batch(
@@ -130,9 +125,7 @@ impl Storage {
         )?;
         let current: Option<i64> = self
             .conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-                row.get(0)
-            })
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .optional()?
             .filter(|v| *v >= 1);
 
@@ -252,6 +245,21 @@ impl Storage {
                  COMMIT;",
             )?;
         }
+        // v4: explicit per-origin site permission decisions (Prompt is implicit).
+        if current.unwrap_or(0) < 4 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE site_permissions (
+                     origin TEXT NOT NULL,
+                     permission TEXT NOT NULL,
+                     value TEXT NOT NULL CHECK (value IN ('allow', 'block', 'prompt')),
+                     PRIMARY KEY (origin, permission)
+                 );
+                 CREATE INDEX idx_site_permissions_origin ON site_permissions(origin);
+                 INSERT INTO schema_version(version) VALUES (4);
+                 COMMIT;",
+            )?;
+        }
         Ok(())
     }
 
@@ -262,7 +270,7 @@ impl Storage {
             .unwrap_or(0)
     }
 
-    /// Hard purge of every user-data row (used when a private session ends).
+    /// Purge all persisted browsing data.
     pub fn purge_all(&self) -> SqlResult<()> {
         self.conn.execute_batch(
             "DELETE FROM cache_entries;
@@ -279,8 +287,6 @@ impl Storage {
         Ok(())
     }
 
-    // -- Bookmarks -----------------------------------------------------------
-
     /// Add a bookmark and return its new row id.
     pub fn add_bookmark(&self, url: &str, title: &str, container_id: Option<i64>) -> SqlResult<i64> {
         self.conn.execute(
@@ -292,14 +298,15 @@ impl Storage {
     }
 
     /// Remove a bookmark by id.
-    pub fn remove_bookmark(&self, id: i64) -> SqlResult<bool> {
-        Ok(self.conn.execute("DELETE FROM bookmarks WHERE id = ?1", [id])? > 0)
+    pub fn remove_bookmark(&self, id: i64) -> SqlResult<usize> {
+        self.conn.execute("DELETE FROM bookmarks WHERE id = ?1", params![id])
     }
 
     /// List bookmarks in insertion order.
     pub fn list_bookmarks(&self) -> SqlResult<Vec<Bookmark>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, url, title, container_id, created_at_epoch_ms FROM bookmarks ORDER BY id",
+            "SELECT id, url, title, container_id, created_at_epoch_ms
+             FROM bookmarks ORDER BY id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Bookmark {
@@ -316,14 +323,12 @@ impl Storage {
     /// Whether `url` is bookmarked.
     pub fn is_bookmarked(&self, url: &str) -> SqlResult<bool> {
         self.conn
-            .query_row("SELECT 1 FROM bookmarks WHERE url = ?1 LIMIT 1", [url], |_| Ok(()))
+            .query_row("SELECT 1 FROM bookmarks WHERE url = ?1 LIMIT 1", params![url], |_| Ok(()))
             .optional()
             .map(|o| o.is_some())
     }
 
-    // -- History -------------------------------------------------------------
-
-    /// Record a visit. Container-id partitioning keeps jars separate in queries.
+    /// Record a history visit.
     pub fn record_history_visit(
         &self,
         url: &str,
@@ -338,15 +343,14 @@ impl Storage {
         Ok(())
     }
 
-    /// Most recent history entries, optionally scoped to one container.
-    pub fn recent_history(&self, limit: u32, container_id: Option<i64>) -> SqlResult<Vec<HistoryEntry>> {
+    /// List history, optionally filtered by container, newest first.
+    pub fn list_history(&self, container_id: Option<i64>, limit: usize) -> SqlResult<Vec<HistoryEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, url, title, container_id, visited_at_epoch_ms
-             FROM history
+            "SELECT id, url, title, container_id, visited_at_epoch_ms FROM history
              WHERE (?1 IS NULL OR container_id = ?1)
              ORDER BY visited_at_epoch_ms DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![container_id, limit], |row| {
+        let rows = stmt.query_map(params![container_id, limit as i64], |row| {
             Ok(HistoryEntry {
                 id: row.get(0)?,
                 url: row.get(1)?,
@@ -358,7 +362,7 @@ impl Storage {
         rows.collect()
     }
 
-    /// Clear the entire browsing history, optionally per container only.
+    /// Clear all history, optionally for one container.
     pub fn clear_history(&self, container_id: Option<i64>) -> SqlResult<usize> {
         self.conn.execute(
             "DELETE FROM history WHERE (?1 IS NULL OR container_id = ?1)",
@@ -366,9 +370,7 @@ impl Storage {
         )
     }
 
-    // -- Search engines --------------------------------------------------------
-
-    /// Register a search engine; `make_default` clears the previous default.
+    /// Add a search engine.
     pub fn add_search_engine(
         &self,
         name: &str,
@@ -377,7 +379,7 @@ impl Storage {
     ) -> SqlResult<i64> {
         let position: i64 = self
             .conn
-            .query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM search_engines", [], |r| r.get(0))?;
+            .query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM search_engines", [], |row| row.get(0))?;
         if make_default {
             self.conn.execute("UPDATE search_engines SET is_default = 0", [])?;
         }
@@ -392,14 +394,14 @@ impl Storage {
     /// Set an existing engine as the sole default.
     pub fn set_default_search_engine(&self, id: i64) -> SqlResult<()> {
         self.conn.execute("UPDATE search_engines SET is_default = 0", [])?;
-        self.conn.execute("UPDATE search_engines SET is_default = 1 WHERE id = ?1", [id])?;
+        self.conn.execute("UPDATE search_engines SET is_default = 1 WHERE id = ?1", params![id])?;
         Ok(())
     }
 
-    /// Return configured search engines in position order.
+    /// List configured search engines in user-defined order.
     pub fn list_search_engines(&self) -> SqlResult<Vec<SearchEngine>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, query_template, is_default, position FROM search_engines ORDER BY position",
+            "SELECT id, name, query_template, is_default, position FROM search_engines ORDER BY position, id",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(SearchEngine {
@@ -413,64 +415,102 @@ impl Storage {
         rows.collect()
     }
 
-    // -- Sessions and tabs ----------------------------------------------------
-
-    /// Save a session, replacing its tabs and groups atomically.
-    pub fn save_session(&self, name: &str, active_tab_id: Option<i64>, tabs: &[StoredTabSeed], created_at_epoch_ms: i64) -> SqlResult<i64> {
+    /// Save a session and its tabs as one transaction.
+    pub fn save_session(&self, name: &str, tabs: &[StoredTabSeed]) -> SqlResult<i64> {
         self.conn.execute("BEGIN IMMEDIATE", [])?;
         let result = (|| {
             self.conn.execute(
-                "INSERT INTO sessions (name, active_tab_id, created_at_epoch_ms) VALUES (?1, ?2, ?3)",
-                params![name, active_tab_id, created_at_epoch_ms],
+                "INSERT INTO sessions (name, created_at_epoch_ms) VALUES (?1, ?2)",
+                params![name, Self::now_ms()],
             )?;
             let session_id = self.conn.last_insert_rowid();
             for tab in tabs {
                 self.conn.execute(
-                    "INSERT INTO tabs (session_id, url, title, parent_tab_id, position, pinned, hibernated, group_id, container_id, last_active_epoch_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![session_id, tab.url, tab.title, tab.parent_tab_id, tab.position, tab.pinned, tab.hibernated, tab.group_id, tab.container_id, tab.last_active_epoch_ms],
+                    "INSERT INTO tabs (session_id, url, title, position, pinned, hibernated, group_id, container_id, last_active_epoch_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![session_id, tab.url, tab.title, tab.position, tab.pinned, tab.hibernated, tab.group_id, tab.container_id, tab.last_active_epoch_ms],
                 )?;
             }
             Ok(session_id)
         })();
         match result {
             Ok(id) => { self.conn.execute("COMMIT", [])?; Ok(id) }
-            Err(error) => { let _ = self.conn.execute("ROLLBACK", []); Err(error) }
+            Err(e) => { let _ = self.conn.execute("ROLLBACK", []); Err(e) }
         }
     }
 
-    /// Load the most recently saved session and its ordered tabs.
-    pub fn load_latest_session(&self) -> SqlResult<Option<SessionRecord>> {
-        let session: Option<(i64, String, Option<i64>, i64)> = self.conn
-            .query_row("SELECT id, name, active_tab_id, created_at_epoch_ms FROM sessions ORDER BY created_at_epoch_ms DESC LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?;
-        let Some((id, name, active_tab_id, created_at_epoch_ms)) = session else { return Ok(None) };
-        let mut stmt = self.conn.prepare("SELECT id, session_id, url, title, parent_tab_id, position, pinned, hibernated, group_id, container_id, last_active_epoch_ms FROM tabs WHERE session_id=?1 ORDER BY position")?;
-        let tabs = stmt.query_map([id], |r| Ok(StoredTab { id:r.get(0)?, session_id:r.get(1)?, url:r.get(2)?, title:r.get(3)?, parent_tab_id:r.get(4)?, position:r.get(5)?, pinned:r.get(6)?, hibernated:r.get(7)?, group_id:r.get(8)?, container_id:r.get(9)?, last_active_epoch_ms:r.get(10)? }))?.collect::<SqlResult<Vec<_>>>()?;
-        Ok(Some(SessionRecord { id, name, active_tab_id, created_at_epoch_ms, tabs }))
+    /// List sessions and their tabs.
+    pub fn list_sessions(&self) -> SqlResult<Vec<SavedSession>> {
+        let mut stmt = self.conn.prepare("SELECT id, name, active_tab_id, created_at_epoch_ms FROM sessions ORDER BY created_at_epoch_ms DESC")?;
+        let rows = stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            Ok(SavedSession {
+                id,
+                name: row.get(1)?,
+                active_tab_id: row.get(2)?,
+                created_at_epoch_ms: row.get(3)?,
+                tabs: self.list_tabs(id)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// List tabs in a saved session.
+    pub fn list_tabs(&self, session_id: i64) -> SqlResult<Vec<StoredTab>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, session_id, url, title, parent_tab_id, position, pinned, hibernated, group_id, container_id, last_active_epoch_ms
+             FROM tabs WHERE session_id = ?1 ORDER BY position, id",
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(StoredTab {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                url: row.get(2)?,
+                title: row.get(3)?,
+                parent_tab_id: row.get(4)?,
+                position: row.get(5)?,
+                pinned: row.get(6)?,
+                hibernated: row.get(7)?,
+                group_id: row.get(8)?,
+                container_id: row.get(9)?,
+                last_active_epoch_ms: row.get(10)?,
+            })
+        })?;
+        rows.collect()
     }
 
     /// Delete a saved session.
-    pub fn delete_session(&self, session_id: i64) -> SqlResult<bool> {
-        Ok(self.conn.execute("DELETE FROM sessions WHERE id=?1", [session_id])? > 0)
+    pub fn delete_session(&self, id: i64) -> SqlResult<usize> {
+        self.conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])
     }
 }
 
-/// Seed record used to persist a tab before its database id has been assigned.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredTabSeed {
-    pub url: String, pub title: String, pub parent_tab_id: Option<i64>, pub position: i64,
-    pub pinned: bool, pub hibernated: bool, pub group_id: Option<i64>, pub container_id: Option<i64>,
+    pub url: String,
+    pub title: String,
+    pub position: i64,
+    pub pinned: bool,
+    pub hibernated: bool,
+    pub group_id: Option<i64>,
+    pub container_id: Option<i64>,
     pub last_active_epoch_ms: i64,
 }
 
 /// A saved browser session and its tabs.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SessionRecord { pub id: i64, pub name: String, pub active_tab_id: Option<i64>, pub created_at_epoch_ms: i64, pub tabs: Vec<StoredTab> }
+pub struct SavedSession {
+    pub id: i64,
+    pub name: String,
+    pub active_tab_id: Option<i64>,
+    pub created_at_epoch_ms: i64,
+    pub tabs: Vec<StoredTab>,
+}
 
-/// Private-mode owner. Dropping the handle purges and closes the in-memory store.
+/// Memory-only session wrapper. Data is purged on explicit end and drop.
 pub struct PrivateSession { storage: Storage }
 impl PrivateSession {
-    pub fn start() -> SqlResult<Self> { Ok(Self { storage: Storage::open_private()? }) }
+    pub fn new() -> SqlResult<Self> { Ok(Self { storage: Storage::open_private()? }) }
     pub fn storage(&self) -> &Storage { &self.storage }
     pub fn end(mut self) -> SqlResult<()> { self.storage.purge_all()?; Ok(()) }
 }
@@ -482,10 +522,11 @@ mod tests {
     #[test]
     fn history_container_partitioning_and_clear() {
         let s = Storage::open_in_memory().unwrap();
-        s.record_history_visit("https://a", "A", Some(1)).unwrap();
-        s.record_history_visit("https://b", "B", Some(2)).unwrap();
-        assert_eq!(s.recent_history(10, Some(1)).unwrap().len(), 1);
+        s.record_history_visit("https://a.test/", "a", Some(1)).unwrap();
+        s.record_history_visit("https://b.test/", "b", Some(2)).unwrap();
+        assert_eq!(s.list_history(Some(1), 10).unwrap().len(), 1);
+        assert_eq!(s.list_history(None, 10).unwrap().len(), 2);
         assert_eq!(s.clear_history(Some(1)).unwrap(), 1);
-        assert_eq!(s.recent_history(10, None).unwrap().len(), 1);
+        assert_eq!(s.list_history(None, 10).unwrap().len(), 1);
     }
 }
