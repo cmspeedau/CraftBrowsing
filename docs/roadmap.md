@@ -52,7 +52,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [x] Tab Grouping, color-coded clusters, and direct Multi-Account Container binding.
 - [x] Session restore engine and memory hibernation / tab discarding for inactive tabs.
 - [x] Local SQLite storage layer for bookmarks, history, tabs, and user-selected search engines (`craft-storage`).
-- [ ] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
+- [x] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
 - [x] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle.
 - [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
 - [ ] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
