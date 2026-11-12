@@ -1,0 +1,31 @@
+[package]
+name = "craft-browsing"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+authors = ["CraftBrowsing Contributors"]
+description = "Customizable, pure-Rust web browser built on Servo with adblocking, local sync, and plugin system."
+readme = "README.md"
+license = "MPL-2.0 OR Apache-2.0"
+
+[workspace]
+members = [
+    "crates/craft-core",
+    "crates/craft-ui",
+    "crates/craft-adblock",
+    "crates/craft-sync",
+    "crates/craft-plugins",
+]
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+deno_core = "0.300"
+adblock = "0.9"
+winit = "0.30"
