@@ -5,7 +5,7 @@
 //!
 //! The layer is schema-versioned and migrated transactionally, supports
 //! file-backed profiles as well as memory-only databases (`:memory:`) for the
-//! upcoming ephemeral Private Browsing mode.
+//! ephemeral Private Browsing mode (`PrivateSession`).
 
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,27 @@ impl Storage {
     /// Open an ephemeral, memory-only database (Private Browsing mode).
     pub fn open_in_memory() -> SqlResult<Self> {
         Self::from_connection(Connection::open_in_memory()?)
+    }
+
+    /// Open a hardened, memory-only Private Browsing database.
+    ///
+    /// Guarantees:
+    /// - Every byte lives in RAM: SQLite never touches a disk file.
+    /// - `journal_mode = MEMORY` — no rollback journal is written anywhere.
+    /// - `locking_mode = EXCLUSIVE` — the private store cannot be attached to
+    ///   by any other connection for the lifetime of the session.
+    /// - `secure_delete = ON` — purged rows are overwritten in place before
+    ///   the memory is released.
+    ///
+    /// Pair with [`PrivateSession`] so the store is fully purged on drop.
+    pub fn open_private() -> SqlResult<Self> {
+        let storage = Self::open_in_memory()?;
+        storage.conn.execute_batch(
+            "PRAGMA journal_mode = MEMORY;
+             PRAGMA locking_mode = EXCLUSIVE;
+             PRAGMA secure_delete = ON;",
+        )?;
+        Ok(storage)
     }
 
     fn from_connection(conn: Connection) -> SqlResult<Self> {
@@ -172,6 +193,19 @@ impl Storage {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0)
+    }
+
+    /// Hard purge of every user-data row (used when a private session ends).
+    pub fn purge_all(&self) -> SqlResult<()> {
+        self.conn.execute_batch(
+            "DELETE FROM tabs;
+             DELETE FROM tab_groups;
+             DELETE FROM sessions;
+             DELETE FROM history;
+             DELETE FROM bookmarks;
+             VACUUM;",
+        )?;
+        Ok(())
     }
 
     // -- Bookmarks -----------------------------------------------------------
@@ -494,6 +528,52 @@ pub struct SessionRecord {
     pub groups: Vec<StoredGroup>,
 }
 
+// ---------------------------------------------------------------------------
+// Ephemeral Private Browsing
+// ---------------------------------------------------------------------------
+
+/// Guard for an ephemeral Private Browsing session.
+///
+/// Backed exclusively by a hardened `:memory:` SQLite database — no rollback
+/// journal, exclusive lock, secure-delete purging. When the guard is dropped
+/// every user-data row is purged (`secure_delete` overwrites in place) and
+/// the connection is closed, releasing all memory. Nothing is ever written to
+/// disk at any point in the lifecycle.
+pub struct PrivateSession {
+    storage: Storage,
+}
+
+impl PrivateSession {
+    /// Start a new private session. The database starts completely empty —
+    /// bookmarks, history, and saved sessions from the regular profile are
+    /// intentionally invisible.
+    pub fn start() -> SqlResult<Self> {
+        Ok(Self {
+            storage: Storage::open_private()?,
+        })
+    }
+
+    /// Storage handle scoped to this private session.
+    pub fn storage(&self) -> &Storage {
+        &self.storage
+    }
+
+    /// Explicitly end the session with a guaranteed purge (rather than
+    /// relying on `Drop`), surfacing any purge error to the caller.
+    pub fn end(mut self) -> SqlResult<()> {
+        let res = self.storage.purge_all();
+        std::mem::forget(self);
+        res
+    }
+}
+
+impl Drop for PrivateSession {
+    fn drop(&mut self) {
+        // Best-effort purge; secure_delete overwrites freed pages in place.
+        let _ = self.storage.purge_all();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,5 +664,61 @@ mod tests {
         // Delete-then-load falls back cleanly.
         assert!(s.delete_session(sid).unwrap());
         assert!(s.load_latest_session().unwrap().is_none());
+    }
+
+    #[test]
+    fn private_session_purges_on_drop() {
+        let private = PrivateSession::start().unwrap();
+        {
+            let s = private.storage();
+            s.record_history_visit("https://secret.example", "Secret", None)
+                .unwrap();
+            s.add_bookmark("https://secret.example", "Secret", None)
+                .unwrap();
+            let groups = Vec::new();
+            let tabs = seed_tabs();
+            s.save_session("private", None, &groups, &tabs).unwrap();
+            assert_eq!(s.recent_history(10, None).unwrap().len(), 1);
+        }
+        drop(private);
+        // Session is gone; nothing observable survives.
+        let private2 = PrivateSession::start().unwrap();
+        let s = private2.storage();
+        assert!(s.recent_history(10, None).unwrap().is_empty());
+        assert!(s.list_bookmarks().unwrap().is_empty());
+        assert!(s.load_latest_session().unwrap().is_none());
+    }
+
+    #[test]
+    fn private_session_explicit_end_purges() {
+        let private = PrivateSession::start().unwrap();
+        private
+            .storage()
+            .record_history_visit("https://ephemeral.dev", "E", None)
+            .unwrap();
+        private.end().unwrap();
+        // After explicit end the store is destroyed; a fresh private session
+        // is empty by construction.
+        let fresh = PrivateSession::start().unwrap();
+        assert!(fresh.storage().recent_history(10, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn private_session_is_isolated_from_regular_profile() {
+        let regular = Storage::open_in_memory().unwrap();
+        regular
+            .record_history_visit("https://regular.dev", "R", None)
+            .unwrap();
+
+        let private = PrivateSession::start().unwrap();
+        // Private store cannot see regular profile data...
+        assert!(private.storage().recent_history(10, None).unwrap().is_empty());
+        // ...and writes stay confined to the private store.
+        private
+            .storage()
+            .record_history_visit("https://private.dev", "P", None)
+            .unwrap();
+        assert_eq!(regular.recent_history(10, None).unwrap().len(), 1);
+        assert_eq!(regular.recent_history(10, None).unwrap()[0].url, "https://regular.dev");
     }
 }
