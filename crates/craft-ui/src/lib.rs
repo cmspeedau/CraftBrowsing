@@ -1,6 +1,7 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
 pub mod window;
+pub mod omnibox;
 
 use craft_adblock::AdblockManager;
 use craft_core::container::{Container, ContainerId};
@@ -12,7 +13,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
 
-pub use window::{BrowserWindowApp, WindowConfig};
+pub use window::{BrowserWindowApp, run_window_event_loop};
+pub use omnibox::{Omnibox, OmniboxAction, OmniboxState, SearchEngine};
 
 pub struct BrowserApp {
     pub adblock: Arc<AdblockManager>,
@@ -24,6 +26,7 @@ pub struct BrowserApp {
     pub plugin_runtime: PluginRuntime,
     pub engine: ServoEngine,
     pub cmd_sender: mpsc::UnboundedSender<EngineCommand>,
+    pub omnibox: Omnibox,
 }
 
 impl BrowserApp {
@@ -33,6 +36,7 @@ impl BrowserApp {
         let adblock = Arc::new(AdblockManager::new());
         let sync_preferences = SyncPreferences::default();
         let plugin_runtime = PluginRuntime::new();
+        let omnibox = Omnibox::default();
 
         let (engine, cmd_sender) = ServoEngine::new(adblock.clone());
 
@@ -46,6 +50,7 @@ impl BrowserApp {
             plugin_runtime,
             engine,
             cmd_sender,
+            omnibox,
         }
     }
 
@@ -57,6 +62,7 @@ impl BrowserApp {
         // Spawn a corresponding Servo browser context partitioned by container
         self.engine.create_context(tab_id.clone(), container_id, url);
         self.active_tab_id = Some(tab_id.clone());
+        self.omnibox.set_text(url);
         tab_id
     }
 
@@ -65,10 +71,30 @@ impl BrowserApp {
             tab.navigate(url);
         }
         self.engine.navigate(tab_id, url);
+        if self.active_tab_id.as_ref() == Some(tab_id) {
+            self.omnibox.set_text(url);
+        }
+    }
+
+    /// Submit omnibox input: parse URL or search query and navigate active tab.
+    pub fn submit_omnibox(&mut self, input: &str) {
+        let action = self.omnibox.resolve(input);
+        let target_url = match action {
+            OmniboxAction::Navigate(url) => url,
+            OmniboxAction::Search { query, engine } => engine.search_url(&query),
+            OmniboxAction::InternalPage(page) => page,
+        };
+
+        if let Some(active_id) = self.active_tab_id.clone() {
+            self.navigate_tab(&active_id, &target_url);
+        } else {
+            self.open_tab(&target_url, ContainerId::default_container());
+        }
     }
 
     pub fn select_tab(&mut self, tab_id: &TabId) {
-        if self.tabs.iter().any(|t| &t.id == tab_id) {
+        if let Some(tab) = self.tabs.iter().find(|t| &t.id == tab_id) {
+            self.omnibox.set_text(&tab.url);
             self.active_tab_id = Some(tab_id.clone());
         }
     }
@@ -80,11 +106,26 @@ impl BrowserApp {
         self.tabs.retain(|t| &t.id != tab_id);
         if self.active_tab_id.as_ref() == Some(tab_id) {
             self.active_tab_id = self.tabs.last().map(|t| t.id.clone());
+            if let Some(active_id) = &self.active_tab_id {
+                if let Some(tab) = self.tabs.iter().find(|t| &t.id == active_id) {
+                    self.omnibox.set_text(&tab.url);
+                }
+            } else {
+                self.omnibox.set_text("");
+            }
         }
     }
 
     pub fn poll_engine_events(&mut self) -> Vec<EngineEvent> {
-        self.engine.poll_events()
+        let events = self.engine.poll_events();
+        for evt in &events {
+            if let EngineEvent::Navigation(nav) = evt {
+                if self.active_tab_id.as_ref() == Some(&nav.tab_id) {
+                    self.omnibox.set_text(&nav.url);
+                }
+            }
+        }
+        events
     }
 }
 
