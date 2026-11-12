@@ -1,6 +1,6 @@
 # Architecture Overview
 
-CraftBrowsing is structured as a modular Cargo workspace separating browser chrome, rendering, networking, devtools, extensions, containers, and sync.
+CraftBrowsing is structured as a modular Cargo workspace separating browser chrome, rendering, networking, devtools, extensions, containers, PWAs, and sync.
 
 ---
 
@@ -12,10 +12,11 @@ CraftBrowsing/
 │   ├── craft-app/           # Main entry point & window management (Iced / Slint)
 │   ├── craft-engine/         # Servo engine embedding & WebRender bindings
 │   ├── craft-adblock/        # Adblock rule engine (brave/adblock crate)
+│   ├── craft-pwa/            # Progressive Web App manager, manifest parser & OS shortcuts
 │   ├── craft-devtools/       # Web Developer Tools (DOM inspector, network, console, storage)
 │   ├── craft-sync/           # E2EE local sync client (Disabled by default, opt-in)
 │   ├── craft-extensions/     # Plugin host, manifest parser, JS runtime (Boa / V8)
-│   └── craft-storage/        # Local SQLite database for history, bookmarks, tabs, containers
+│   └── craft-storage/        # Local SQLite database for history, bookmarks, tabs, containers, PWAs
 ├── docs/                     # Architectural specifications and developer guides
 ├── Cargo.toml                # Workspace manifest
 └── README.md
@@ -30,6 +31,7 @@ CraftBrowsing/
 | **Rendering & DOM** | [Servo](https://servo.org/) / WebRender | Parallelized, pure-Rust layout, HTML parsing, and GPU rendering |
 | **Browser Chrome (UI)** | [Iced](https://github.com/iced-rs/iced) or [Slint](https://slint.dev/) | High-performance, GPU-accelerated declarative UI |
 | **Ad-Blocking** | [`adblock-rust`](https://github.com/brave/adblock-rust) | Sub-millisecond URL filtering matching uBlock / Brave rulesets |
+| **Progressive Web Apps** | `craft-pwa` | W3C manifest parsing, chromeless standalone windows, and OS desktop shortcuts |
 | **Developer Tools** | `craft-devtools` / Chrome DevTools Protocol (CDP) | Native DOM/CSS inspector, console repl, network waterfall, and storage inspector |
 | **Extension Runtime** | [Boa Engine](https://github.com/boa-dev/boa) / [Deno Core](https://github.com/denoland/deno_core) | Secure, sandboxed JavaScript runtime for extension background scripts |
 | **Storage Engine** | `rusqlite` | Structured local storage for bookmarks, history, containers, and search configs |
