@@ -55,7 +55,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [x] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
 - [x] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle.
 - [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
-- [ ] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
+- [x] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
 - [ ] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
 - [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
 - [ ] CI/CD release matrix for Windows (`.exe`/`.msix`), macOS (`.dmg`), and Linux AppImage with `zsync` (`docs/releases-and-packaging.md`).
