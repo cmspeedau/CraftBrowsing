@@ -17,7 +17,6 @@ members = [
     "crates/craft-adblock",
     "crates/craft-sync",
     "crates/craft-plugins",
-    "crates/craft-downloads",
 ]
 
 [workspace.dependencies]
