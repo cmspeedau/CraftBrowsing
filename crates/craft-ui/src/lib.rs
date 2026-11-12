@@ -3,7 +3,7 @@
 use craft_adblock::AdblockManager;
 use craft_core::container::{Container, ContainerId};
 use craft_core::tab::{Tab, TabGroup, TabId};
-use craft_engine::{ServoConfig, ServoEngine, NavigationCommand, EngineEvent};
+use craft_engine::{EngineCommand, EngineEvent, ServoEngine};
 use craft_plugins::PluginRuntime;
 use craft_sync::protocol::SyncPreferences;
 use std::sync::Arc;
@@ -14,11 +14,12 @@ pub struct BrowserApp {
     pub adblock: Arc<AdblockManager>,
     pub sync_preferences: SyncPreferences,
     pub tabs: Vec<Tab>,
+    pub active_tab_id: Option<TabId>,
     pub groups: Vec<TabGroup>,
     pub containers: Vec<Container>,
     pub plugin_runtime: PluginRuntime,
     pub engine: ServoEngine,
-    pub engine_events_rx: mpsc::UnboundedReceiver<EngineEvent>,
+    pub cmd_sender: mpsc::UnboundedSender<EngineCommand>,
 }
 
 impl BrowserApp {
@@ -29,19 +30,18 @@ impl BrowserApp {
         let sync_preferences = SyncPreferences::default();
         let plugin_runtime = PluginRuntime::new();
 
-        let (events_tx, events_rx) = mpsc::unbounded_channel();
-        let servo_config = ServoConfig::default();
-        let engine = ServoEngine::new(servo_config, events_tx);
+        let (engine, cmd_sender) = ServoEngine::new(adblock.clone());
 
         Self {
             adblock,
             sync_preferences,
             tabs: Vec::new(),
+            active_tab_id: None,
             groups: Vec::new(),
             containers: Vec::new(),
             plugin_runtime,
             engine,
-            engine_events_rx: events_rx,
+            cmd_sender,
         }
     }
 
@@ -51,23 +51,42 @@ impl BrowserApp {
         self.tabs.push(tab);
 
         // Spawn a corresponding Servo browser context partitioned by container
-        self.engine.create_browser_context(tab_id.clone(), container_id, url.to_string());
+        self.engine.create_context(tab_id.clone(), container_id, url);
+        self.active_tab_id = Some(tab_id.clone());
         tab_id
     }
 
-    pub fn navigate_tab(&self, tab_id: &TabId, url: &str) {
-        self.engine.dispatch_navigation(
-            tab_id,
-            NavigationCommand::Navigate {
-                url: url.to_string(),
-                user_initiated: true,
-            },
-        );
+    pub fn navigate_tab(&mut self, tab_id: &TabId, url: &str) {
+        if let Some(tab) = self.tabs.iter_mut().find(|t| &t.id == tab_id) {
+            tab.navigate(url);
+        }
+        self.engine.navigate(tab_id, url);
+    }
+
+    pub fn select_tab(&mut self, tab_id: &TabId) {
+        if self.tabs.iter().any(|t| &t.id == tab_id) {
+            self.active_tab_id = Some(tab_id.clone());
+        }
     }
 
     pub fn close_tab(&mut self, tab_id: &TabId) {
-        self.engine.close_browser_context(tab_id);
+        let _ = self.cmd_sender.send(EngineCommand::DestroyContext {
+            tab_id: tab_id.clone(),
+        });
         self.tabs.retain(|t| &t.id != tab_id);
+        if self.active_tab_id.as_ref() == Some(tab_id) {
+            self.active_tab_id = self.tabs.last().map(|t| t.id.clone());
+        }
+    }
+
+    pub fn poll_engine_events(&mut self) -> Vec<EngineEvent> {
+        self.engine.poll_events()
+    }
+}
+
+impl Default for BrowserApp {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
