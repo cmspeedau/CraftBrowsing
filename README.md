@@ -40,6 +40,7 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 
 ## Documentation
 
+- [Project Roadmap (Source of Truth)](docs/roadmap.md)
 - [Security & Privacy Architecture & User Toggles](docs/security-and-privacy.md)
 - [Architecture Overview](docs/architecture.md)
 - [Containers Specification](docs/containers.md)
@@ -50,39 +51,6 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 - [Web Developer Tools](docs/devtools.md)
 - [Plugin System & Extensions](docs/plugin-system.md)
 - [Passwords & External Manager Integration](docs/passwords.md)
-- [Roadmap](docs/roadmap.md)
-
----
-
-## Roadmap
-
-### Phase 1: Core Foundation & Essential UX
-- [ ] Embed Servo runtime with WebRender surface compositor in `craft-engine`.
-- [ ] Implement declarative browser chrome with tabs, address bar (Omnibox), and search keyword shortcuts in `craft-app`.
-- [ ] Build session restore engine and tab hibernation / memory discarding for inactive tabs.
-- [ ] Implement Private Browsing mode with ephemeral memory-backed storage.
-- [ ] Hook `craft-adblock` into the network request interception pipeline with address bar quick-toggle.
-- [ ] Introduce containerized cookie & storage isolation (`docs/containers.md`).
-- [ ] Build basic download manager with pause/resume and container context (`docs/downloads.md`).
-- [ ] Unified Site Permissions prompt manager (camera, microphone, notifications, clipboard).
-- [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable switches.
-
-### Phase 2: Media, Hardware Flashing, DevTools & Sync
-- [ ] Build in-process Web Developer Tools panel (`docs/devtools.md`).
-- [ ] Add Chrome DevTools Protocol (CDP) WebSocket listener for remote debugging.
-- [ ] Implement Progressive Web App (PWA) installation and standalone windows (`docs/pwa.md`).
-- [ ] Implement `craft-hardware` for WebSerial, WebUSB, and WebHID device flashing with zero-trust prompts (`docs/hardware-and-devices.md`).
-- [ ] Media playback pipeline (AV1, VP9, Opus via OS media backends) and Picture-in-Picture (PiP).
-- [ ] Built-in PDF viewer and print layout integration.
-- [ ] Distraction-free Reader View text extractor.
-- [ ] Implement opt-in peer-to-peer sync for bookmarks, history, containers, block lists, and PWAs (`docs/sync.md`).
-
-### Phase 3: Ecosystem, Extensibility & Advanced Security
-- [ ] WebExtensions runtime supporting Manifest v2/v3 APIs (`docs/plugin-system.md`).
-- [ ] Native messaging bridge for external password managers (Bitwarden, KeePassXC).
-- [ ] Community theming and customizable UI layouts (including vertical tabs).
-- [ ] Anti-fingerprinting protections (canvas blunting, audio context jitter, referrer trimming) with per-site exceptions.
-- [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector.
 
 ---
 

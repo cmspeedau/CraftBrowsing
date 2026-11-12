@@ -1,35 +1,81 @@
-# CraftBrowsing Project Roadmap
+# CraftBrowsing Project Roadmap & Release Schedule
 
-This roadmap outlines the milestones for delivering a pure-Rust, privacy-first web browser.
+This document serves as the **authoritative single source of truth** for CraftBrowsing's engineering milestones, feature specifications, version control schema, and release track lifecycle.
 
 ---
 
-## Phase 1: Engine Foundation & Shell
+## 1. Version Control & Release Strategy
+
+CraftBrowsing strictly adheres to **Semantic Versioning (SemVer 2.0.0)** formatted as `vMAJOR.MINOR.PATCH`:
+
+- **MAJOR (`X.0.0`):** Breaking engine architecture shifts, major IPC protocol breaks, or fundamental storage migrations.
+- **MINOR (`0.X.0`):** New functional capabilities, new browser subsystems, or expanded Web platform APIs.
+- **PATCH (`0.0.X`):** Memory safety fixes, critical security advisories, filter-list engine performance patches, and bug fixes.
+
+### Release Channels
+
+| Channel | Target Audience | Branch / Git Tag | Update Cycle |
+| :--- | :--- | :--- | :--- |
+| **Nightly** | Active contributors & core engine testers | `main` | Continuous rolling builds |
+| **Beta** | Community testers & plugin developers | `beta` (`vX.Y.0-beta.N`) | Bi-weekly freeze & QA |
+| **Stable** | General production end-users | `release` (`vX.Y.Z`) | Monthly scheduled releases & zero-day hotfixes |
+
+---
+
+## 2. Release Milestones & Phase Tracking
+
+### v0.1.0 — Phase 1: Core Foundation & Essential Shell
 - [x] Workspace architecture setup with latest stable Rust.
-- [ ] Servo engine integration & basic WebRender surface embedding.
-- [ ] Core browser chrome (URL bar, tab management, back/forward navigation).
-- [ ] SQLite storage layer for bookmarks, history, and search engine defaults.
+- [ ] Embed Servo runtime with WebRender surface compositor in `craft-engine`.
+- [ ] Implement declarative browser chrome with tabs, address bar (Omnibox), and search keyword shortcuts in `craft-app`.
+- [ ] Local SQLite storage layer for bookmarks, history, tabs, and user-selected search engines (`craft-storage`).
+- [ ] Session restore engine and tab hibernation / memory discarding for inactive tabs.
+- [ ] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
+- [ ] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle.
+- [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning).
+- [ ] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
+- [ ] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
+- [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
 
-## Phase 2: Privacy, Containers & Networking
-- [ ] Native ad-blocking pipeline using `adblock-rust`.
-- [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar & storage partitioning).
-- [ ] User-configurable search engine selection (DuckDuckGo, SearXNG, Brave Search, etc.).
-- [ ] External password manager bridge (Bitwarden, 1Password, KeePassXC via native messaging).
+### v0.2.0 — Phase 2: Developer Experience, PWAs & Hardware Flashing
+- [ ] **In-Process Web Developer Tools (`docs/devtools.md`):**
+  - [ ] Live DOM tree & CSS inspector with box-model visualizer.
+  - [ ] Network waterfall monitor with header inspection and adblock filter hit badges.
+  - [ ] Interactive JavaScript Console (REPL).
+  - [ ] Containerized Storage Inspector (`localStorage`, `sessionStorage`, Cookies, IndexedDB).
+- [ ] **Chrome DevTools Protocol (CDP) Bridge:** WebSocket endpoint for remote debugging and headless test automation.
+- [ ] **Progressive Web Apps (`docs/pwa.md`):** W3C manifest parser, standalone chromeless windows, native OS shortcuts, and container context inheritance.
+- [ ] **Hardware Flashing & Device Access (`docs/hardware-and-devices.md`):**
+  - [ ] `craft-hardware` engine bridge for WebSerial, WebUSB, and WebHID.
+  - [ ] Native device picker dialogs with VID/PID inspection (ESP32, Arduino, WebDFU, QMK).
+  - [ ] Zero-trust permission model with instant address-bar killswitch (disabled by default).
+- [ ] **Media & Document Reader:**
+  - [ ] Media playback pipeline (AV1, VP9, Opus via OS media backends) and Picture-in-Picture (PiP).
+  - [ ] Built-in PDF viewer and native print pipeline.
+  - [ ] Distraction-free Reader View text extractor.
 
-## Phase 3: Built-in Web Developer Tools
-- [ ] **DOM & Style Inspector:** Live DOM tree inspection, CSS style rule editor, and box-model viewer.
-- [ ] **Network Waterfall:** Real-time request logging, timing breakdowns, header inspection, and adblocker hit badges.
-- [ ] **Interactive Console:** JavaScript REPL and console error/warning streaming.
-- [ ] **Container Storage Inspector:** Inspect cookies, `localStorage`, `sessionStorage`, and IndexedDB partitioned per container.
-- [ ] **Remote Debugging / CDP Bridge:** Optional WebSocket endpoint for remote inspection and headless test automation.
+### v0.3.0 — Phase 3: Zero-Knowledge Local Sync (Opt-In)
+- [ ] Cryptographic engine using `x25519-dalek` and `chacha20poly1305` (`docs/sync.md`).
+- [ ] Zero-broadcast architecture: network listeners completely dormant until explicitly turned on by user.
+- [ ] Local mDNS peer-to-peer device discovery and QR-code/PIN mutual authentication.
+- [ ] Fine-grained sync selectors: independent toggles for bookmarks, history, tabs, containers, blocklists, and PWAs.
+- [ ] Optional lightweight, zero-knowledge Docker sync relay for cross-network synchronization.
 
-## Phase 4: Extensions & Customization
-- [ ] WebExtensions manifest parser and Boa/Deno JS sandbox runtime.
+### v0.4.0 — Phase 4: Extensions, Security Hardening & Ecosystem
+- [ ] WebExtensions manifest parser and sandboxed JavaScript runtime (Boa Engine / Deno Core).
 - [ ] Firefox-compatible extension APIs (`tabs`, `storage`, `contextualIdentities`, `webRequest`).
-- [ ] Customizable theme engine and user styles.
+- [ ] External password manager Native Messaging IPC bridge (Bitwarden, 1Password, KeePassXC).
+- [ ] Anti-fingerprinting defenses (canvas blunting, audio context jitter, font enumeration shielding).
+- [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector with zero-log presets (Quad9, Mullvad).
+- [ ] Customizable theme engine and UI chrome layout presets (including vertical tabs).
 
-## Phase 5: Local Self-Hosted Sync (Opt-In)
-- [ ] End-to-end encryption engine (`x25519-dalek`, `chacha20poly1305`).
-- [ ] Local mDNS peer-to-peer discovery on LAN (disabled by default).
-- [ ] Container settings, bookmark, and tab synchronization.
-- [ ] Optional lightweight Docker relay server for cross-network syncing.
+---
+
+## 3. Maintenance & Change Log Conventions
+
+All architectural revisions, feature additions, and milestone completions must be recorded in git history using [Conventional Commits](https://www.conventionalcommits.org/):
+
+- `feat(subsystem):` New user-facing or architectural capability.
+- `fix(subsystem):` Bug, memory, or security patch.
+- `docs(spec):` Updates to specifications, roadmap, or documentation.
+- `sec(perimeter):` Critical security boundary or sandboxing enhancement.
