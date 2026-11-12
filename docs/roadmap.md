@@ -102,7 +102,7 @@ Full architectural details for packaging, binary delta updates, and code signing
 - [ ] **WebExtensions Sandbox & Extension Runtime (`docs/plugin-system.md`):**
   - [ ] Manifest v2/v3 parser and sandboxed JavaScript runtime (Boa Engine / Deno Core).
   - [ ] Firefox-compatible extension APIs (`tabs`, `storage`, `contextualIdentities`, `webRequest`).
-  - [ ] External password manager Native Messaging IPC bridge (Bitwarden, 1Password, KeePalXC).
+  - [ ] External password manager Native Messaging IPC bridge (Bitwarden, 1Password, KeePassXC).
 - [ ] **Advanced Security Hardening:**
   - [ ] Anti-fingerprinting defenses (canvas blunting, audio context jitter, font enumeration shielding).
   - [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector with zero-log presets (Quad9, Mullvad).
