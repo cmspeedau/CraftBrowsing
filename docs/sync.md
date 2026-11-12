@@ -9,14 +9,45 @@ CraftBrowsing offers peer-to-peer, end-to-end encrypted synchronization without 
 In keeping with a strict privacy-by-default posture:
 - **Default State: Disabled.** CraftBrowsing will never initiate network discovery (mDNS), open background sockets, or broadcast device availability until explicitly enabled by the user in settings (`craft://settings/sync`).
 - **Explicit User Opt-In:** Enabling sync requires generating or pairing via an encryption passphrase / device recovery key.
-- **Granular Controls:** When enabled, users can selectively toggle what syncs (Bookmarks, History, Container Rules, Tabs).
+- **Granular Controls:** When enabled, users can selectively toggle what syncs (Bookmarks, History, Containers, Block Lists, Tabs).
 
 ---
 
 ## Features
 
-- **End-to-End Encryption:** Profile databases (bookmarks, history, open tabs, container definitions) are encrypted locally using ChaCha20-Poly1305 before transmission.
+- **End-to-End Encryption:** Profile databases (bookmarks, history, open tabs, container definitions, adblock filter lists) are encrypted locally using ChaCha20-Poly1305 before transmission.
+- **Block List & Filter Rule Synchronization:**
+  - **Subscribed Filter Lists:** URLs, update schedules, and toggle states (e.g., EasyList, EasyPrivacy, uBlock filters) sync across paired devices.
+  - **Custom User Rules:** User-defined block/allow rules (`||example.com^`, cosmetic filters) sync seamlessly.
+  - **Per-Site Allowlist/Exceptions:** Sites where adblocking has been disabled by the user sync consistently so exceptions apply across all of the user's machines.
+  - **Bandwidth Optimization:** Filter lists themselves are not re-transmitted over the wire if already publicly fetchable; devices sync list metadata/URLs and download locally, while custom rules sync as lightweight delta records.
 - **Container Synchronization:** Container setups (names, icons, colors, domain routing rules) and container-tagged open tabs sync seamlessly across devices. (Session cookies and credentials remain local only).
 - **Local Network Discovery (Opt-In):** When sync is toggled on, uses mDNS (`mdns-sd`) to discover other CraftBrowsing instances on the local Wi-Fi/LAN automatically.
 - **Self-Hosted Relay Option:** For syncing across different networks, users can run a lightweight Docker container relaying encrypted blobs over WebSockets.
-- **Conflict Resolution:** CRDTs (Conflict-free Replicated Data Types) or Last-Write-Wins (LWW) timestamps manage concurrent updates for bookmarks, history, and containers.
+- **Conflict Resolution:** CRDTs (Conflict-free Replicated Data Types) or Last-Write-Wins (LWW) timestamps manage concurrent updates for bookmarks, history, containers, and block lists.
+
+---
+
+## Sync Configuration Model
+
+```rust
+pub struct SyncPreferences {
+    /// Master toggle (defaults to false)
+    pub sync_enabled: bool,
+    /// Granular item toggles
+    pub sync_bookmarks: bool,
+    pub sync_history: bool,
+    pub sync_open_tabs: bool,
+    pub sync_containers: bool,
+    pub sync_block_lists: bool, // Subscriptions, custom filters, and site exceptions
+}
+
+pub struct BlockListSyncPayload {
+    /// Active filter list subscription URLs & metadata
+    pub subscribed_lists: Vec<FilterSubscriptionMetadata>,
+    /// Custom adblock filter rules authored by the user
+    pub custom_rules: Vec<String>,
+    /// Domains added to the user's global or container-specific allowlist
+    pub site_exceptions: Vec<String>,
+}
+```
