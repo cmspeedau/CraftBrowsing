@@ -108,7 +108,25 @@ impl BrowserApp {
             self.omnibox.set_text(&tab.url);
             self.active_tab_id = Some(tab_id.clone());
             self.tab_manager.active_tab_id = Some(tab_id.clone());
+
+            // If tab was hibernated, wake it up in the rendering engine
+            if let Some(node) = self.tab_manager.get_node_mut(tab_id) {
+                if node.state == TabState::Hibernated {
+                    self.tab_manager.wake_tab(tab_id);
+                    self.engine.create_context(tab_id.clone(), node.container_id.clone(), &node.url);
+                }
+            }
         }
+    }
+
+    pub fn hibernate_tab(&mut self, tab_id: &TabId) {
+        if self.active_tab_id.as_ref() == Some(tab_id) {
+            return; // Never hibernate active tab
+        }
+        self.tab_manager.hibernate_tab(tab_id);
+        let _ = self.cmd_sender.send(EngineCommand::DestroyContext {
+            tab_id: tab_id.clone(),
+        });
     }
 
     pub fn close_tab(&mut self, tab_id: &TabId) {
