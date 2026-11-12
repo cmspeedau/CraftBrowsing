@@ -26,6 +26,7 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 ## Key Highlights
 
 - **Pure Rust Engine:** Powered by Servo and WebRender for fast, memory-safe layout and parallel rendering.
+- **Cross-Platform Releases & Auto-Update:** Native builds for Windows (with silent background auto-updates), macOS (universal notarized `.dmg` with in-app updater), and Linux (**AppImage with `zsync` delta updates**).
 - **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline (with per-site shield toggle).
 - **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
 - **Progressive Web Apps (PWAs):** Install web apps into standalone, chromeless windows with native OS shortcuts, full adblocking, and container isolation.
@@ -40,7 +41,8 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 
 ## Documentation
 
-- [Project Roadmap (Source of Truth)](docs/roadmap.md)
+- [Project Roadmap & Release Schedule](docs/roadmap.md) *(Authoritative Source of Truth)*
+- [Packaging, Distribution & Auto-Update Architecture](docs/releases-and-packaging.md)
 - [Security & Privacy Architecture & User Toggles](docs/security-and-privacy.md)
 - [Architecture Overview](docs/architecture.md)
 - [Containers Specification](docs/containers.md)

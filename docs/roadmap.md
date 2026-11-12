@@ -1,6 +1,6 @@
 # CraftBrowsing Project Roadmap & Release Schedule
 
-This document serves as the **authoritative single source of truth** for CraftBrowsing's engineering milestones, feature specifications, version control schema, and release track lifecycle.
+This document serves as the **authoritative single source of truth** for CraftBrowsing's engineering milestones, feature specifications, version control schema, packaging targets, and release track lifecycle.
 
 ---
 
@@ -22,7 +22,28 @@ CraftBrowsing strictly adheres to **Semantic Versioning (SemVer 2.0.0)** formatt
 
 ---
 
-## 2. Release Milestones & Phase Tracking
+## 2. Multi-Platform Packaging & Auto-Update Engine
+
+Full architectural details for packaging, binary delta updates, and code signing are specified in [`docs/releases-and-packaging.md`](releases-and-packaging.md).
+
+- **Windows (`x86_64` / `aarch64`):**
+  - Native installer (`.exe` NSIS / `.msix`).
+  - Background auto-update service with stage-and-swap on restart.
+  - Authenticode code signing & Ed25519 payload verification.
+- **macOS (`Universal`: Apple Silicon & Intel):**
+  - Notarized `.dmg` / `.app` bundle with Apple Hardened Runtime.
+  - In-app auto-updater with Ed25519 manifest verification and atomic bundle replacement.
+- **Linux (`x86_64` / `aarch64`):**
+  - Standalone portable **AppImage** bundle.
+  - **`zsync` block-level differential updates** downloading only modified byte ranges (reducing ~120 MB updates down to 5–15 MB).
+  - Embedded `X-AppImage-UpdateInformation` metadata for direct desktop integration.
+- **Privacy & User Sovereignty:**
+  - Auto-updates can be set to Automatic, Notify Only, or Completely Disabled (`craft://settings/updates`).
+  - Zero-telemetry update checks (static manifest requests without unique hardware or user IDs).
+
+---
+
+## 3. Release Milestones & Phase Tracking
 
 ### v0.1.0 — Phase 1: Core Foundation & Essential Shell
 - [x] Workspace architecture setup with latest stable Rust.
@@ -36,6 +57,7 @@ CraftBrowsing strictly adheres to **Semantic Versioning (SemVer 2.0.0)** formatt
 - [ ] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
 - [ ] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
 - [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
+- [ ] CI/CD release matrix for Windows (`.exe`/`.msix`), macOS (`.dmg`), and Linux AppImage with `zsync` (`docs/releases-and-packaging.md`).
 
 ### v0.2.0 — Phase 2: Developer Experience, PWAs & Hardware Flashing
 - [ ] **In-Process Web Developer Tools (`docs/devtools.md`):**
@@ -68,10 +90,11 @@ CraftBrowsing strictly adheres to **Semantic Versioning (SemVer 2.0.0)** formatt
 - [ ] Anti-fingerprinting defenses (canvas blunting, audio context jitter, font enumeration shielding).
 - [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector with zero-log presets (Quad9, Mullvad).
 - [ ] Customizable theme engine and UI chrome layout presets (including vertical tabs).
+- [ ] In-browser auto-update background worker integration for Windows, macOS, and Linux AppImage zsync.
 
 ---
 
-## 3. Maintenance & Change Log Conventions
+## 4. Maintenance & Change Log Conventions
 
 All architectural revisions, feature additions, and milestone completions must be recorded in git history using [Conventional Commits](https://www.conventionalcommits.org/):
 
