@@ -28,6 +28,9 @@ pub struct TabNode {
     pub is_collapsed: bool,
 }
 
+/// Backward compatibility alias
+pub type TabTreeNode = TabNode;
+
 impl TabNode {
     pub fn new(id: TabId, parent_tab_id: Option<TabId>, container_id: ContainerId, url: &str) -> Self {
         Self {
@@ -75,6 +78,16 @@ impl VerticalTabManager {
             groups: Vec::new(),
             active_tab_id: None,
         }
+    }
+
+    /// Retrieve a reference to a node by its ID.
+    pub fn get_node(&self, tab_id: &TabId) -> Option<&TabNode> {
+        self.nodes.iter().find(|n| &n.id == tab_id)
+    }
+
+    /// Retrieve a mutable reference to a node by its ID.
+    pub fn get_node_mut(&mut self, tab_id: &TabId) -> Option<&mut TabNode> {
+        self.nodes.iter_mut().find(|n| &n.id == tab_id)
     }
 
     /// Insert a newly created tab into the tree.
@@ -325,5 +338,24 @@ mod tests {
         assert_eq!(manager.nodes.len(), 1);
         assert_eq!(manager.nodes[0].id, t2);
         assert!(manager.nodes[0].parent_tab_id.is_none());
+    }
+
+    #[test]
+    fn test_get_node_mut_and_hibernation() {
+        let mut manager = VerticalTabManager::new();
+        let t1 = TabId("t1".into());
+        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+
+        if let Some(node) = manager.get_node_mut(&t1) {
+            node.is_active = false;
+        }
+        manager.hibernate_tab(&t1);
+
+        let node = manager.get_node(&t1).unwrap();
+        assert_eq!(node.state, TabState::Hibernated);
+
+        manager.wake_tab(&t1);
+        let node = manager.get_node(&t1).unwrap();
+        assert_eq!(node.state, TabState::Ready);
     }
 }
