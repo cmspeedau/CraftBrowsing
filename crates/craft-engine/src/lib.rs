@@ -1,19 +1,19 @@
 //! Servo rendering engine integration and lifecycle manager for CraftBrowsing.
 
+pub mod compositor;
 pub mod events;
 pub mod pipeline;
-pub mod compositor;
 
+use craft_adblock::AdblockManager;
+use craft_core::container::ContainerId;
+use craft_core::tab::TabId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-use craft_core::container::ContainerId;
-use craft_core::tab::TabId;
-use craft_adblock::AdblockManager;
 
-pub use events::{EngineEvent, NavigationEvent, PageLoadState};
 pub use compositor::CompositorSurface;
+pub use events::{EngineEvent, NavigationEvent, PageLoadState};
 
 /// Represents an individual Servo browsing context tied to a Tab and Container.
 #[derive(Debug)]
@@ -106,8 +106,15 @@ impl ServoEngine {
                 info!("Servo engine worker thread started.");
                 while let Some(command) = cmd_rx.blocking_recv() {
                     match command {
-                        EngineCommand::CreateContext { tab_id, container_id, url } => {
-                            info!("Engine: creating browsing context for tab {:?} in container {:?}", tab_id, container_id);
+                        EngineCommand::CreateContext {
+                            tab_id,
+                            container_id,
+                            url,
+                        } => {
+                            info!(
+                                "Engine: creating browsing context for tab {:?} in container {:?}",
+                                tab_id, container_id
+                            );
                             let _ = event_tx.send(EngineEvent::Navigation(NavigationEvent {
                                 tab_id: tab_id.clone(),
                                 state: PageLoadState::Started,
@@ -140,11 +147,24 @@ impl ServoEngine {
                         EngineCommand::DestroyContext { tab_id } => {
                             info!("Engine: destroying context for tab {:?}", tab_id);
                         }
-                        EngineCommand::ResizeViewport { tab_id, width, height } => {
-                            info!("Engine: resized tab {:?} viewport to {}x{}", tab_id, width, height);
+                        EngineCommand::ResizeViewport {
+                            tab_id,
+                            width,
+                            height,
+                        } => {
+                            info!(
+                                "Engine: resized tab {:?} viewport to {}x{}",
+                                tab_id, width, height
+                            );
                         }
-                        EngineCommand::Reload { tab_id, bypass_cache } => {
-                            info!("Engine: reload tab {:?} (bypass_cache: {})", tab_id, bypass_cache);
+                        EngineCommand::Reload {
+                            tab_id,
+                            bypass_cache,
+                        } => {
+                            info!(
+                                "Engine: reload tab {:?} (bypass_cache: {})",
+                                tab_id, bypass_cache
+                            );
                         }
                         EngineCommand::Stop { tab_id } => {
                             info!("Engine: stop loading tab {:?}", tab_id);

@@ -31,7 +31,13 @@ pub struct Container {
 }
 
 impl Container {
-    pub fn new(id: ContainerId, name: impl Into<String>, icon: impl Into<String>, color_hex: impl Into<String>, user_context_id: u32) -> Self {
+    pub fn new(
+        id: ContainerId,
+        name: impl Into<String>,
+        icon: impl Into<String>,
+        color_hex: impl Into<String>,
+        user_context_id: u32,
+    ) -> Self {
         Self {
             id,
             name: name.into(),

@@ -14,7 +14,7 @@ pub mod downloads;
 pub mod permissions;
 pub mod privacy_settings;
 
-use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
 use serde::{Deserialize, Serialize};
 
 pub use containers::{CacheEntry, Container, CookieEntry, OriginEntry};
@@ -125,7 +125,9 @@ impl Storage {
         )?;
         let current: Option<i64> = self
             .conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
             .optional()?
             .filter(|v| *v >= 1);
 
@@ -288,7 +290,12 @@ impl Storage {
     }
 
     /// Add a bookmark and return its new row id.
-    pub fn add_bookmark(&self, url: &str, title: &str, container_id: Option<i64>) -> SqlResult<i64> {
+    pub fn add_bookmark(
+        &self,
+        url: &str,
+        title: &str,
+        container_id: Option<i64>,
+    ) -> SqlResult<i64> {
         self.conn.execute(
             "INSERT INTO bookmarks (url, title, container_id, created_at_epoch_ms)
              VALUES (?1, ?2, ?3, ?4)",
@@ -299,7 +306,8 @@ impl Storage {
 
     /// Remove a bookmark by id.
     pub fn remove_bookmark(&self, id: i64) -> SqlResult<usize> {
-        self.conn.execute("DELETE FROM bookmarks WHERE id = ?1", params![id])
+        self.conn
+            .execute("DELETE FROM bookmarks WHERE id = ?1", params![id])
     }
 
     /// List bookmarks in insertion order.
@@ -323,7 +331,11 @@ impl Storage {
     /// Whether `url` is bookmarked.
     pub fn is_bookmarked(&self, url: &str) -> SqlResult<bool> {
         self.conn
-            .query_row("SELECT 1 FROM bookmarks WHERE url = ?1 LIMIT 1", params![url], |_| Ok(()))
+            .query_row(
+                "SELECT 1 FROM bookmarks WHERE url = ?1 LIMIT 1",
+                params![url],
+                |_| Ok(()),
+            )
             .optional()
             .map(|o| o.is_some())
     }
@@ -344,7 +356,11 @@ impl Storage {
     }
 
     /// List history, optionally filtered by container, newest first.
-    pub fn list_history(&self, container_id: Option<i64>, limit: usize) -> SqlResult<Vec<HistoryEntry>> {
+    pub fn list_history(
+        &self,
+        container_id: Option<i64>,
+        limit: usize,
+    ) -> SqlResult<Vec<HistoryEntry>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, url, title, container_id, visited_at_epoch_ms FROM history
              WHERE (?1 IS NULL OR container_id = ?1)
@@ -377,11 +393,14 @@ impl Storage {
         query_template: &str,
         make_default: bool,
     ) -> SqlResult<i64> {
-        let position: i64 = self
-            .conn
-            .query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM search_engines", [], |row| row.get(0))?;
+        let position: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM search_engines",
+            [],
+            |row| row.get(0),
+        )?;
         if make_default {
-            self.conn.execute("UPDATE search_engines SET is_default = 0", [])?;
+            self.conn
+                .execute("UPDATE search_engines SET is_default = 0", [])?;
         }
         self.conn.execute(
             "INSERT INTO search_engines (name, query_template, is_default, position)
@@ -393,8 +412,12 @@ impl Storage {
 
     /// Set an existing engine as the sole default.
     pub fn set_default_search_engine(&self, id: i64) -> SqlResult<()> {
-        self.conn.execute("UPDATE search_engines SET is_default = 0", [])?;
-        self.conn.execute("UPDATE search_engines SET is_default = 1 WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("UPDATE search_engines SET is_default = 0", [])?;
+        self.conn.execute(
+            "UPDATE search_engines SET is_default = 1 WHERE id = ?1",
+            params![id],
+        )?;
         Ok(())
     }
 
@@ -434,8 +457,14 @@ impl Storage {
             Ok(session_id)
         })();
         match result {
-            Ok(id) => { self.conn.execute("COMMIT", [])?; Ok(id) }
-            Err(e) => { let _ = self.conn.execute("ROLLBACK", []); Err(e) }
+            Ok(id) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(id)
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
         }
     }
 
@@ -481,7 +510,8 @@ impl Storage {
 
     /// Delete a saved session.
     pub fn delete_session(&self, id: i64) -> SqlResult<usize> {
-        self.conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])
+        self.conn
+            .execute("DELETE FROM sessions WHERE id = ?1", params![id])
     }
 }
 
@@ -508,13 +538,28 @@ pub struct SavedSession {
 }
 
 /// Memory-only session wrapper. Data is purged on explicit end and drop.
-pub struct PrivateSession { storage: Storage }
-impl PrivateSession {
-    pub fn new() -> SqlResult<Self> { Ok(Self { storage: Storage::open_private()? }) }
-    pub fn storage(&self) -> &Storage { &self.storage }
-    pub fn end(mut self) -> SqlResult<()> { self.storage.purge_all()?; Ok(()) }
+pub struct PrivateSession {
+    storage: Storage,
 }
-impl Drop for PrivateSession { fn drop(&mut self) { let _ = self.storage.purge_all(); } }
+impl PrivateSession {
+    pub fn new() -> SqlResult<Self> {
+        Ok(Self {
+            storage: Storage::open_private()?,
+        })
+    }
+    pub fn storage(&self) -> &Storage {
+        &self.storage
+    }
+    pub fn end(mut self) -> SqlResult<()> {
+        self.storage.purge_all()?;
+        Ok(())
+    }
+}
+impl Drop for PrivateSession {
+    fn drop(&mut self) {
+        let _ = self.storage.purge_all();
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -522,8 +567,10 @@ mod tests {
     #[test]
     fn history_container_partitioning_and_clear() {
         let s = Storage::open_in_memory().unwrap();
-        s.record_history_visit("https://a.test/", "a", Some(1)).unwrap();
-        s.record_history_visit("https://b.test/", "b", Some(2)).unwrap();
+        s.record_history_visit("https://a.test/", "a", Some(1))
+            .unwrap();
+        s.record_history_visit("https://b.test/", "b", Some(2))
+            .unwrap();
         assert_eq!(s.list_history(Some(1), 10).unwrap().len(), 1);
         assert_eq!(s.list_history(None, 10).unwrap().len(), 2);
         assert_eq!(s.clear_history(Some(1)).unwrap(), 1);

@@ -4,4 +4,6 @@ pub mod crypto;
 pub mod protocol;
 
 pub use crypto::SyncCipher;
-pub use protocol::{BlockListSyncPayload, DeviceTabSession, PwaAppSyncPayload, SendTabPayload, SyncPreferences};
+pub use protocol::{
+    BlockListSyncPayload, DeviceTabSession, PwaAppSyncPayload, SendTabPayload, SyncPreferences,
+};

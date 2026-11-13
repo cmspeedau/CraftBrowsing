@@ -1,13 +1,23 @@
-use serde::{Deserialize, Serialize};
 use crate::container::ContainerId;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownloadState {
     Queued,
-    Downloading { bytes_received: u64, total_bytes: Option<u64> },
-    Paused { bytes_received: u64, total_bytes: Option<u64> },
-    Completed { target_path: String },
-    Failed { reason: String },
+    Downloading {
+        bytes_received: u64,
+        total_bytes: Option<u64>,
+    },
+    Paused {
+        bytes_received: u64,
+        total_bytes: Option<u64>,
+    },
+    Completed {
+        target_path: String,
+    },
+    Failed {
+        reason: String,
+    },
     Cancelled,
 }
 

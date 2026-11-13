@@ -54,7 +54,10 @@ impl OmniboxState {
         }
 
         // 3. Check for explicit web schemes
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") || trimmed.starts_with("file://") {
+        if trimmed.starts_with("http://")
+            || trimmed.starts_with("https://")
+            || trimmed.starts_with("file://")
+        {
             return OmniboxTarget::Url(trimmed.to_string());
         }
 
@@ -96,7 +99,10 @@ impl OmniboxState {
             "!w" | "!wiki" => Some(OmniboxTarget::Search {
                 engine: "Wikipedia".into(),
                 query: query.into(),
-                resolved_url: format!("https://en.wikipedia.org/wiki/Special:Search?search={}", encoded),
+                resolved_url: format!(
+                    "https://en.wikipedia.org/wiki/Special:Search?search={}",
+                    encoded
+                ),
             }),
             "!gh" => Some(OmniboxTarget::Search {
                 engine: "GitHub".into(),

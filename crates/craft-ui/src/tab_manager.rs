@@ -35,7 +35,12 @@ pub struct TabNode {
 pub type TabTreeNode = TabNode;
 
 impl TabNode {
-    pub fn new(id: TabId, parent_tab_id: Option<TabId>, container_id: ContainerId, url: &str) -> Self {
+    pub fn new(
+        id: TabId,
+        parent_tab_id: Option<TabId>,
+        container_id: ContainerId,
+        url: &str,
+    ) -> Self {
         Self {
             id,
             title: url.to_string(),
@@ -62,7 +67,11 @@ impl TabNode {
             child_tab_ids: Vec::new(),
             group_id: tab.group_id.clone(),
             is_active,
-            state: if is_active { TabState::Active } else { TabState::Ready },
+            state: if is_active {
+                TabState::Active
+            } else {
+                TabState::Ready
+            },
             is_collapsed: false,
             pinned: tab.pinned,
             last_active_epoch_ms: tab.last_active_epoch_ms,
@@ -154,7 +163,11 @@ impl VerticalTabManager {
 
     /// Remove a tab and reparent or orphan child tabs cleanly.
     pub fn remove_tab(&mut self, tab_id: &TabId) {
-        let parent_id = self.nodes.iter().find(|n| &n.id == tab_id).and_then(|n| n.parent_tab_id.clone());
+        let parent_id = self
+            .nodes
+            .iter()
+            .find(|n| &n.id == tab_id)
+            .and_then(|n| n.parent_tab_id.clone());
 
         // Remove from parent's children list
         if let Some(ref pid) = parent_id {
@@ -317,11 +330,7 @@ impl VerticalTabManager {
 
         for node in self.nodes.iter_mut() {
             let is_idle = now_epoch_ms.saturating_sub(node.last_active_epoch_ms) >= threshold;
-            if !node.is_active
-                && !node.pinned
-                && node.state == TabState::Ready
-                && is_idle
-            {
+            if !node.is_active && !node.pinned && node.state == TabState::Ready && is_idle {
                 node.state = TabState::Hibernated;
                 discarded.push(node.id.clone());
             }
@@ -447,7 +456,12 @@ impl VerticalTabManager {
 
     /// Retrieve the group a tab currently belongs to, if any.
     pub fn get_group_for_tab(&self, tab_id: &TabId) -> Option<&TabGroup> {
-        let group_id = self.nodes.iter().find(|n| &n.id == tab_id)?.group_id.clone()?;
+        let group_id = self
+            .nodes
+            .iter()
+            .find(|n| &n.id == tab_id)?
+            .group_id
+            .clone()?;
         self.groups.iter().find(|g| g.id == group_id)
     }
 
@@ -479,7 +493,11 @@ impl VerticalTabManager {
             .collect();
 
         let mut visual_items = Vec::new();
-        let root_tabs: Vec<_> = self.nodes.iter().filter(|n| n.parent_tab_id.is_none()).collect();
+        let root_tabs: Vec<_> = self
+            .nodes
+            .iter()
+            .filter(|n| n.parent_tab_id.is_none())
+            .collect();
 
         for root in root_tabs {
             self.collect_visual_nodes(root, 0, &collapsed_groups, &mut visual_items);
@@ -568,8 +586,16 @@ mod tests {
     #[test]
     fn test_tree_tab_nesting_and_collapse() {
         let mut manager = VerticalTabManager::new();
-        let tab1 = Tab::new(TabId("t1".into()), "https://example.com", ContainerId::default_container());
-        let mut tab2 = Tab::new(TabId("t2".into()), "https://example.org", ContainerId::default_container());
+        let tab1 = Tab::new(
+            TabId("t1".into()),
+            "https://example.com",
+            ContainerId::default_container(),
+        );
+        let mut tab2 = Tab::new(
+            TabId("t2".into()),
+            "https://example.org",
+            ContainerId::default_container(),
+        );
         tab2.parent_tab_id = Some(TabId("t1".into()));
 
         let tabs = vec![tab1, tab2];
@@ -593,8 +619,18 @@ mod tests {
         let t1 = TabId("t1".into());
         let t2 = TabId("t2".into());
 
-        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
-        manager.insert_tab(t2.clone(), Some(t1.clone()), ContainerId::default_container(), "https://example.org");
+        manager.insert_tab(
+            t1.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.com",
+        );
+        manager.insert_tab(
+            t2.clone(),
+            Some(t1.clone()),
+            ContainerId::default_container(),
+            "https://example.org",
+        );
 
         assert_eq!(manager.nodes.len(), 2);
         let items = manager.get_render_tree();
@@ -611,7 +647,12 @@ mod tests {
     fn test_get_node_mut_and_hibernation() {
         let mut manager = VerticalTabManager::new();
         let t1 = TabId("t1".into());
-        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+        manager.insert_tab(
+            t1.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.com",
+        );
 
         if let Some(node) = manager.get_node_mut(&t1) {
             node.is_active = false;
@@ -630,7 +671,12 @@ mod tests {
     fn test_create_group_and_assign_tab_with_container_binding() {
         let mut manager = VerticalTabManager::new();
         let t1 = TabId("t1".into());
-        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+        manager.insert_tab(
+            t1.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.com",
+        );
 
         // Create a group bound to the Work container
         let group = manager.create_group(
@@ -655,8 +701,18 @@ mod tests {
         let mut manager = VerticalTabManager::new();
         let t1 = TabId("t1".into());
         let t2 = TabId("t2".into());
-        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
-        manager.insert_tab(t2.clone(), None, ContainerId::default_container(), "https://example.org");
+        manager.insert_tab(
+            t1.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.com",
+        );
+        manager.insert_tab(
+            t2.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.org",
+        );
 
         let group = manager.create_group("Shopping", "#ef9d69", None);
         manager.assign_tab_to_group(&t2, &group);
@@ -677,8 +733,18 @@ mod tests {
         let mut manager = VerticalTabManager::new();
         let t1 = TabId("t1".into());
         let t2 = TabId("t2".into());
-        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
-        manager.insert_tab(t2.clone(), None, ContainerId::default_container(), "https://example.org");
+        manager.insert_tab(
+            t1.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.com",
+        );
+        manager.insert_tab(
+            t2.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.org",
+        );
 
         let group = manager.create_group("Banking", "#a45b41", None);
         manager.assign_tab_to_group(&t1, &group);
@@ -711,7 +777,12 @@ mod tests {
     fn test_remove_group_unassigns_members() {
         let mut manager = VerticalTabManager::new();
         let t1 = TabId("t1".into());
-        manager.insert_tab(t1.clone(), None, ContainerId::default_container(), "https://example.com");
+        manager.insert_tab(
+            t1.clone(),
+            None,
+            ContainerId::default_container(),
+            "https://example.com",
+        );
 
         let group = manager.create_group("Temp", "#000000", None);
         manager.assign_tab_to_group(&t1, &group);
@@ -724,9 +795,20 @@ mod tests {
     #[test]
     fn test_session_snapshot_and_restore() {
         let mut manager = VerticalTabManager::new();
-        manager.insert_tab(TabId("t1".into()), None, ContainerId::default_container(), "https://example.com");
-        manager.insert_tab(TabId("t2".into()), None, ContainerId::new(ContainerId::WORK), "https://example.org");
-        let group = manager.create_group("Work", "#5385a6", Some(ContainerId::new(ContainerId::WORK)));
+        manager.insert_tab(
+            TabId("t1".into()),
+            None,
+            ContainerId::default_container(),
+            "https://example.com",
+        );
+        manager.insert_tab(
+            TabId("t2".into()),
+            None,
+            ContainerId::new(ContainerId::WORK),
+            "https://example.org",
+        );
+        let group =
+            manager.create_group("Work", "#5385a6", Some(ContainerId::new(ContainerId::WORK)));
         manager.assign_tab_to_group(&TabId("t2".into()), &group);
 
         let snapshot = manager.snapshot_session();
@@ -749,7 +831,12 @@ mod tests {
     #[test]
     fn test_restore_falls_back_when_active_tab_missing() {
         let mut snapshot = SessionSnapshot {
-            tabs: vec![TabNode::new(TabId("t1".into()), None, ContainerId::default_container(), "https://example.com")],
+            tabs: vec![TabNode::new(
+                TabId("t1".into()),
+                None,
+                ContainerId::default_container(),
+                "https://example.com",
+            )],
             groups: Vec::new(),
             active_tab_id: Some(TabId("gone".into())),
         };
@@ -764,10 +851,30 @@ mod tests {
     #[test]
     fn test_discard_idle_tabs_policy() {
         let mut manager = VerticalTabManager::new();
-        manager.insert_tab(TabId("active".into()), None, ContainerId::default_container(), "https://a.com");
-        manager.insert_tab(TabId("fresh".into()), None, ContainerId::default_container(), "https://b.com");
-        manager.insert_tab(TabId("stale".into()), None, ContainerId::default_container(), "https://c.com");
-        manager.insert_tab(TabId("pinned".into()), None, ContainerId::default_container(), "https://d.com");
+        manager.insert_tab(
+            TabId("active".into()),
+            None,
+            ContainerId::default_container(),
+            "https://a.com",
+        );
+        manager.insert_tab(
+            TabId("fresh".into()),
+            None,
+            ContainerId::default_container(),
+            "https://b.com",
+        );
+        manager.insert_tab(
+            TabId("stale".into()),
+            None,
+            ContainerId::default_container(),
+            "https://c.com",
+        );
+        manager.insert_tab(
+            TabId("pinned".into()),
+            None,
+            ContainerId::default_container(),
+            "https://d.com",
+        );
 
         // Only "active" stays active (insert_tab marks each new tab active; reset manually)
         if let Some(n) = manager.get_node_mut(&TabId("active".into())) {
@@ -795,9 +902,21 @@ mod tests {
 
         let discarded = manager.discard_idle_tabs(now);
         assert_eq!(discarded, vec![TabId("stale".into())]);
-        assert_eq!(manager.get_node(&TabId("stale".into())).unwrap().state, TabState::Hibernated);
-        assert_eq!(manager.get_node(&TabId("fresh".into())).unwrap().state, TabState::Ready);
-        assert_eq!(manager.get_node(&TabId("pinned".into())).unwrap().state, TabState::Ready);
-        assert_eq!(manager.get_node(&TabId("active".into())).unwrap().state, TabState::Active);
+        assert_eq!(
+            manager.get_node(&TabId("stale".into())).unwrap().state,
+            TabState::Hibernated
+        );
+        assert_eq!(
+            manager.get_node(&TabId("fresh".into())).unwrap().state,
+            TabState::Ready
+        );
+        assert_eq!(
+            manager.get_node(&TabId("pinned".into())).unwrap().state,
+            TabState::Ready
+        );
+        assert_eq!(
+            manager.get_node(&TabId("active".into())).unwrap().state,
+            TabState::Active
+        );
     }
 }

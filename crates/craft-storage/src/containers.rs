@@ -9,7 +9,7 @@
 //! Deleting a container purges every partitioned row that belonged to it,
 //! mirroring Firefox's "remove container and its data" semantics.
 
-use rusqlite::{params, OptionalExtension, Result as SqlResult};
+use rusqlite::{OptionalExtension, Result as SqlResult, params};
 
 use crate::Storage;
 
@@ -132,18 +132,12 @@ impl Storage {
     pub fn delete_container(&self, id: i64) -> SqlResult<bool> {
         self.conn.execute_batch("BEGIN;")?;
         let res = (|| {
-            self.conn.execute(
-                "DELETE FROM cookies WHERE container_id = ?1",
-                [id],
-            )?;
-            self.conn.execute(
-                "DELETE FROM origin_storage WHERE container_id = ?1",
-                [id],
-            )?;
-            self.conn.execute(
-                "DELETE FROM cache_entries WHERE container_id = ?1",
-                [id],
-            )?;
+            self.conn
+                .execute("DELETE FROM cookies WHERE container_id = ?1", [id])?;
+            self.conn
+                .execute("DELETE FROM origin_storage WHERE container_id = ?1", [id])?;
+            self.conn
+                .execute("DELETE FROM cache_entries WHERE container_id = ?1", [id])?;
             Ok(self
                 .conn
                 .execute("DELETE FROM containers WHERE id = ?1", [id])?
@@ -320,7 +314,9 @@ mod tests {
     #[test]
     fn container_crud_and_lookup() {
         let s = Storage::open_in_memory().unwrap();
-        let personal = s.create_container("Personal", "#4a90d9", "fingerprint").unwrap();
+        let personal = s
+            .create_container("Personal", "#4a90d9", "fingerprint")
+            .unwrap();
         let work = s.create_container("Work", "#7bc86c", "briefcase").unwrap();
         assert_ne!(personal, work);
 
@@ -328,7 +324,10 @@ mod tests {
         assert_eq!(c.name, "Work");
         assert_eq!(c.color_hex, "#7bc86c");
 
-        assert!(s.update_container(work, "Employer", "#e0704a", "building").unwrap());
+        assert!(
+            s.update_container(work, "Employer", "#e0704a", "building")
+                .unwrap()
+        );
         assert_eq!(s.get_container(work).unwrap().unwrap().name, "Employer");
         assert_eq!(s.list_containers().unwrap().len(), 2);
         assert!(s.get_container(999).unwrap().is_none());
@@ -340,13 +339,26 @@ mod tests {
         let work = s.create_container("Work", "#7bc86c", "briefcase").unwrap();
 
         // Same (domain, name) cookie in three different jars.
-        s.set_cookie(None, "https://shop.example", "session", "default-jar").unwrap();
-        s.set_cookie(Some(work), "https://shop.example", "session", "work-jar").unwrap();
-        assert!(s.cookies_for(None).unwrap().iter().all(|c| c.value != "work-jar"));
-        assert!(s.cookies_for(Some(work)).unwrap().iter().all(|c| c.value != "default-jar"));
+        s.set_cookie(None, "https://shop.example", "session", "default-jar")
+            .unwrap();
+        s.set_cookie(Some(work), "https://shop.example", "session", "work-jar")
+            .unwrap();
+        assert!(
+            s.cookies_for(None)
+                .unwrap()
+                .iter()
+                .all(|c| c.value != "work-jar")
+        );
+        assert!(
+            s.cookies_for(Some(work))
+                .unwrap()
+                .iter()
+                .all(|c| c.value != "default-jar")
+        );
 
         // Overwrite within one jar only.
-        s.set_cookie(Some(work), "https://shop.example", "session", "work-jar-2").unwrap();
+        s.set_cookie(Some(work), "https://shop.example", "session", "work-jar-2")
+            .unwrap();
         let work_jar = s.cookies_for(Some(work)).unwrap();
         assert_eq!(work_jar.len(), 1);
         assert_eq!(work_jar[0].value, "work-jar-2");
@@ -363,23 +375,37 @@ mod tests {
         let banking = s.create_container("Banking", "#8f44ad", "dollar").unwrap();
 
         // Same origin + key, different partitions.
-        s.set_origin_storage(None, "https://portal.example", "theme", "light").unwrap();
-        s.set_origin_storage(Some(banking), "https://portal.example", "theme", "dark").unwrap();
+        s.set_origin_storage(None, "https://portal.example", "theme", "light")
+            .unwrap();
+        s.set_origin_storage(Some(banking), "https://portal.example", "theme", "dark")
+            .unwrap();
         assert_eq!(
-            s.origin_storage_get(None, "https://portal.example", "theme").unwrap(),
+            s.origin_storage_get(None, "https://portal.example", "theme")
+                .unwrap(),
             Some("light".into())
         );
         assert_eq!(
-            s.origin_storage_get(Some(banking), "https://portal.example", "theme").unwrap(),
+            s.origin_storage_get(Some(banking), "https://portal.example", "theme")
+                .unwrap(),
             Some("dark".into())
         );
-        assert_eq!(s.origin_storage_for(Some(banking), "https://portal.example").unwrap().len(), 1);
+        assert_eq!(
+            s.origin_storage_for(Some(banking), "https://portal.example")
+                .unwrap()
+                .len(),
+            1
+        );
 
         // Cache entries stay partitioned too.
-        s.record_cache_entry(None, "https://cdn.example/app.js", 1024).unwrap();
-        s.record_cache_entry(Some(banking), "https://cdn.example/app.js", 4096).unwrap();
+        s.record_cache_entry(None, "https://cdn.example/app.js", 1024)
+            .unwrap();
+        s.record_cache_entry(Some(banking), "https://cdn.example/app.js", 4096)
+            .unwrap();
         assert_eq!(s.cache_entries_for(None).unwrap()[0].size_bytes, 1024);
-        assert_eq!(s.cache_entries_for(Some(banking)).unwrap()[0].size_bytes, 4096);
+        assert_eq!(
+            s.cache_entries_for(Some(banking)).unwrap()[0].size_bytes,
+            4096
+        );
         assert_eq!(s.clear_cache(Some(banking)).unwrap(), 1);
         assert!(s.cache_entries_for(Some(banking)).unwrap().is_empty());
         assert_eq!(s.cache_entries_for(None).unwrap().len(), 1);
@@ -390,16 +416,24 @@ mod tests {
         let s = Storage::open_in_memory().unwrap();
         let shopping = s.create_container("Shopping", "#e0704a", "cart").unwrap();
 
-        s.set_cookie(Some(shopping), "https://store.example", "cart", "abc").unwrap();
-        s.set_origin_storage(Some(shopping), "https://store.example", "prefs", "x").unwrap();
-        s.record_cache_entry(Some(shopping), "https://store.example/a.png", 2048).unwrap();
+        s.set_cookie(Some(shopping), "https://store.example", "cart", "abc")
+            .unwrap();
+        s.set_origin_storage(Some(shopping), "https://store.example", "prefs", "x")
+            .unwrap();
+        s.record_cache_entry(Some(shopping), "https://store.example/a.png", 2048)
+            .unwrap();
         // Data in other partitions must survive.
-        s.set_cookie(None, "https://store.example", "cart", "default").unwrap();
+        s.set_cookie(None, "https://store.example", "cart", "default")
+            .unwrap();
 
         assert!(s.delete_container(shopping).unwrap());
         assert!(s.get_container(shopping).unwrap().is_none());
         assert!(s.cookies_for(Some(shopping)).unwrap().is_empty());
-        assert_eq!(s.origin_storage_get(Some(shopping), "https://store.example", "prefs").unwrap(), None);
+        assert_eq!(
+            s.origin_storage_get(Some(shopping), "https://store.example", "prefs")
+                .unwrap(),
+            None
+        );
         assert!(s.cache_entries_for(Some(shopping)).unwrap().is_empty());
         // Default jar untouched.
         assert_eq!(s.cookies_for(None).unwrap().len(), 1);

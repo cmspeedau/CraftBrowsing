@@ -10,9 +10,7 @@
 pub mod paths;
 pub mod validate;
 
-pub use paths::{
-    default_download_dir, ensure_dir, persistable_dir, resolve_user_dir,
-};
+pub use paths::{default_download_dir, ensure_dir, persistable_dir, resolve_user_dir};
 pub use validate::{is_valid_download_url, is_valid_magnet_url};
 
 // Additional modules will be added as the engine is wired in:

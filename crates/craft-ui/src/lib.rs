@@ -1,8 +1,8 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
-pub mod window;
 pub mod omnibox;
 pub mod tab_manager;
+pub mod window;
 
 use craft_adblock::AdblockManager;
 use craft_core::container::{Container, ContainerId};
@@ -14,9 +14,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
 
-pub use window::{BrowserWindowApp, run_window_event_loop};
 pub use omnibox::{Omnibox, OmniboxAction, OmniboxState, SearchEngine};
-pub use tab_manager::{VerticalTabManager, TabNode, TabState};
+pub use tab_manager::{TabNode, TabState, VerticalTabManager};
+pub use window::{BrowserWindowApp, run_window_event_loop};
 
 pub struct BrowserApp {
     pub adblock: Arc<AdblockManager>,
@@ -66,10 +66,12 @@ impl BrowserApp {
 
         // Register in tree-style VerticalTabManager
         let parent_id = self.active_tab_id.clone();
-        self.tab_manager.insert_tab(tab_id.clone(), parent_id, container_id.clone(), url);
+        self.tab_manager
+            .insert_tab(tab_id.clone(), parent_id, container_id.clone(), url);
 
         // Spawn a corresponding Servo browser context partitioned by container
-        self.engine.create_context(tab_id.clone(), container_id, url);
+        self.engine
+            .create_context(tab_id.clone(), container_id, url);
         self.active_tab_id = Some(tab_id.clone());
         self.tab_manager.active_tab_id = Some(tab_id.clone());
         self.omnibox.set_text(url);
@@ -113,7 +115,11 @@ impl BrowserApp {
             if let Some(node) = self.tab_manager.get_node_mut(tab_id) {
                 if node.state == TabState::Hibernated {
                     self.tab_manager.wake_tab(tab_id);
-                    self.engine.create_context(tab_id.clone(), node.container_id.clone(), &node.url);
+                    self.engine.create_context(
+                        tab_id.clone(),
+                        node.container_id.clone(),
+                        &node.url,
+                    );
                 }
             }
         }
@@ -171,6 +177,9 @@ impl Default for BrowserApp {
 
 fn uuid_v4_stub() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     format!("tab-{:x}", nanos)
 }

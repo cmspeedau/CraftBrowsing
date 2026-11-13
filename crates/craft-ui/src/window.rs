@@ -9,9 +9,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
+use crate::BrowserApp;
 use craft_core::container::ContainerId;
 use craft_engine::CompositorSurface;
-use crate::BrowserApp;
 
 /// Winit application runner embedding the CraftBrowsing browser shell and native rendering surface.
 pub struct BrowserWindowApp {
@@ -46,7 +46,9 @@ impl BrowserWindowApp {
                 // Ctrl/Cmd + T: Open new tab
                 Key::Character(c) if c.to_ascii_lowercase() == "t" => {
                     info!("Shortcut: New Tab");
-                    let tab_id = self.app.open_tab("craft://welcome", ContainerId::default_container());
+                    let tab_id = self
+                        .app
+                        .open_tab("craft://welcome", ContainerId::default_container());
                     info!("Created tab: {:?}", tab_id);
                 }
                 // Ctrl/Cmd + W: Close active tab
@@ -60,10 +62,13 @@ impl BrowserWindowApp {
                 Key::Character(c) if c.to_ascii_lowercase() == "r" => {
                     if let Some(active_id) = self.app.active_tab_id.as_ref() {
                         info!("Shortcut: Reload Tab {:?}", active_id);
-                        let _ = self.app.cmd_sender.send(craft_engine::EngineCommand::Reload {
-                            tab_id: active_id.clone(),
-                            bypass_cache: false,
-                        });
+                        let _ = self
+                            .app
+                            .cmd_sender
+                            .send(craft_engine::EngineCommand::Reload {
+                                tab_id: active_id.clone(),
+                                bypass_cache: false,
+                            });
                     }
                 }
                 Key::Named(NamedKey::Escape) => {
@@ -102,7 +107,8 @@ impl ApplicationHandler for BrowserWindowApp {
 
                     // Ensure an initial tab is open
                     if self.app.tabs.is_empty() {
-                        self.app.open_tab("craft://welcome", ContainerId::default_container());
+                        self.app
+                            .open_tab("craft://welcome", ContainerId::default_container());
                     }
 
                     self.window = Some(window_ref);
@@ -130,11 +136,14 @@ impl ApplicationHandler for BrowserWindowApp {
 
                     // Propagate resize to active tab in engine
                     if let Some(active_id) = self.app.active_tab_id.as_ref() {
-                        let _ = self.app.cmd_sender.send(craft_engine::EngineCommand::ResizeViewport {
-                            tab_id: active_id.clone(),
-                            width: physical_size.width,
-                            height: physical_size.height,
-                        });
+                        let _ =
+                            self.app
+                                .cmd_sender
+                                .send(craft_engine::EngineCommand::ResizeViewport {
+                                    tab_id: active_id.clone(),
+                                    width: physical_size.width,
+                                    height: physical_size.height,
+                                });
                     }
                 }
             }

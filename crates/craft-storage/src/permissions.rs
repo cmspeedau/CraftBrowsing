@@ -1,6 +1,6 @@
 //! Per-origin site permissions with Prompt as the implicit default.
 
-use rusqlite::{params, OptionalExtension, Result as SqlResult};
+use rusqlite::{OptionalExtension, Result as SqlResult, params};
 use serde::{Deserialize, Serialize};
 
 use crate::Storage;
@@ -221,37 +221,97 @@ mod tests {
     #[test]
     fn missing_permission_defaults_to_prompt_and_requests_prompt() {
         let s = storage();
-        assert_eq!(s.query_permission("https://example.com", PermissionType::Camera).unwrap(), PermissionValue::Prompt);
-        assert!(s.should_show_permission_prompt("https://example.com", PermissionType::Camera).unwrap());
+        assert_eq!(
+            s.query_permission("https://example.com", PermissionType::Camera)
+                .unwrap(),
+            PermissionValue::Prompt
+        );
+        assert!(
+            s.should_show_permission_prompt("https://example.com", PermissionType::Camera)
+                .unwrap()
+        );
     }
 
     #[test]
     fn set_query_and_upsert_permission() {
         let s = storage();
-        s.set_permission("https://example.com", PermissionType::Camera, PermissionValue::Allow).unwrap();
-        assert_eq!(s.query_permission("https://example.com", PermissionType::Camera).unwrap(), PermissionValue::Allow);
-        s.set_permission("https://example.com", PermissionType::Camera, PermissionValue::Block).unwrap();
-        assert_eq!(s.query_permission("https://example.com", PermissionType::Camera).unwrap(), PermissionValue::Block);
-        assert!(!s.should_show_permission_prompt("https://example.com", PermissionType::Camera).unwrap());
+        s.set_permission(
+            "https://example.com",
+            PermissionType::Camera,
+            PermissionValue::Allow,
+        )
+        .unwrap();
+        assert_eq!(
+            s.query_permission("https://example.com", PermissionType::Camera)
+                .unwrap(),
+            PermissionValue::Allow
+        );
+        s.set_permission(
+            "https://example.com",
+            PermissionType::Camera,
+            PermissionValue::Block,
+        )
+        .unwrap();
+        assert_eq!(
+            s.query_permission("https://example.com", PermissionType::Camera)
+                .unwrap(),
+            PermissionValue::Block
+        );
+        assert!(
+            !s.should_show_permission_prompt("https://example.com", PermissionType::Camera)
+                .unwrap()
+        );
     }
 
     #[test]
     fn permission_settings_are_isolated_by_origin_and_kind() {
         let s = storage();
-        s.set_permission("https://one.test", PermissionType::Location, PermissionValue::Allow).unwrap();
-        assert_eq!(s.query_permission("https://two.test", PermissionType::Location).unwrap(), PermissionValue::Prompt);
-        assert_eq!(s.query_permission("https://one.test", PermissionType::Microphone).unwrap(), PermissionValue::Prompt);
+        s.set_permission(
+            "https://one.test",
+            PermissionType::Location,
+            PermissionValue::Allow,
+        )
+        .unwrap();
+        assert_eq!(
+            s.query_permission("https://two.test", PermissionType::Location)
+                .unwrap(),
+            PermissionValue::Prompt
+        );
+        assert_eq!(
+            s.query_permission("https://one.test", PermissionType::Microphone)
+                .unwrap(),
+            PermissionValue::Prompt
+        );
     }
 
     #[test]
     fn list_reset_origin_and_clear_all_permissions() {
         let s = storage();
-        s.set_permission("https://one.test", PermissionType::Camera, PermissionValue::Allow).unwrap();
-        s.set_permission("https://one.test", PermissionType::Popup, PermissionValue::Block).unwrap();
-        s.set_permission("https://two.test", PermissionType::Camera, PermissionValue::Block).unwrap();
+        s.set_permission(
+            "https://one.test",
+            PermissionType::Camera,
+            PermissionValue::Allow,
+        )
+        .unwrap();
+        s.set_permission(
+            "https://one.test",
+            PermissionType::Popup,
+            PermissionValue::Block,
+        )
+        .unwrap();
+        s.set_permission(
+            "https://two.test",
+            PermissionType::Camera,
+            PermissionValue::Block,
+        )
+        .unwrap();
         assert_eq!(s.list_permissions().unwrap().len(), 3);
         assert_eq!(s.reset_for_origin("https://one.test").unwrap(), 2);
-        assert_eq!(s.query_permission("https://one.test", PermissionType::Camera).unwrap(), PermissionValue::Prompt);
+        assert_eq!(
+            s.query_permission("https://one.test", PermissionType::Camera)
+                .unwrap(),
+            PermissionValue::Prompt
+        );
         assert_eq!(s.clear_all_permissions().unwrap(), 1);
         assert!(s.list_permissions().unwrap().is_empty());
     }
@@ -259,10 +319,41 @@ mod tests {
     #[test]
     fn prompt_answers_are_remembered_only_when_requested() {
         let s = storage();
-        assert_eq!(s.record_prompt_answer("https://example.com", PermissionType::Notifications, PermissionValue::Block, false).unwrap(), PermissionValue::Block);
-        assert_eq!(s.query_permission("https://example.com", PermissionType::Notifications).unwrap(), PermissionValue::Prompt);
-        s.record_prompt_answer("https://example.com", PermissionType::Notifications, PermissionValue::Allow, true).unwrap();
-        assert_eq!(s.query_permission("https://example.com", PermissionType::Notifications).unwrap(), PermissionValue::Allow);
-        assert!(s.record_prompt_answer("https://example.com", PermissionType::Notifications, PermissionValue::Prompt, true).is_err());
+        assert_eq!(
+            s.record_prompt_answer(
+                "https://example.com",
+                PermissionType::Notifications,
+                PermissionValue::Block,
+                false
+            )
+            .unwrap(),
+            PermissionValue::Block
+        );
+        assert_eq!(
+            s.query_permission("https://example.com", PermissionType::Notifications)
+                .unwrap(),
+            PermissionValue::Prompt
+        );
+        s.record_prompt_answer(
+            "https://example.com",
+            PermissionType::Notifications,
+            PermissionValue::Allow,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            s.query_permission("https://example.com", PermissionType::Notifications)
+                .unwrap(),
+            PermissionValue::Allow
+        );
+        assert!(
+            s.record_prompt_answer(
+                "https://example.com",
+                PermissionType::Notifications,
+                PermissionValue::Prompt,
+                true
+            )
+            .is_err()
+        );
     }
 }

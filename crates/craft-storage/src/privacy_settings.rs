@@ -1,5 +1,5 @@
 //! Persistent Firefox-style privacy preferences and browsing-data cleanup.
-use rusqlite::{params, OptionalExtension, Result as SqlResult};
+use rusqlite::{OptionalExtension, Result as SqlResult, params};
 use serde::{Deserialize, Serialize};
 
 use crate::Storage;
@@ -115,9 +115,21 @@ impl Storage {
         options: ClearDataOptions,
     ) -> SqlResult<ClearDataResult> {
         Ok(ClearDataResult {
-            cookies: if options.cookies { self.clear_cookies(options.container_id)? } else { 0 },
-            cache: if options.cache { self.clear_cache(options.container_id)? } else { 0 },
-            history: if options.history { self.clear_history(options.container_id)? } else { 0 },
+            cookies: if options.cookies {
+                self.clear_cookies(options.container_id)?
+            } else {
+                0
+            },
+            cache: if options.cache {
+                self.clear_cache(options.container_id)?
+            } else {
+                0
+            },
+            history: if options.history {
+                self.clear_history(options.container_id)?
+            } else {
+                0
+            },
             cleared_at_epoch_ms: now,
         })
     }
@@ -144,7 +156,11 @@ impl Storage {
 
     fn privacy_setting_value(&self, key: &str) -> SqlResult<Option<String>> {
         self.conn
-            .query_row("SELECT value FROM privacy_settings WHERE key = ?1", [key], |row| row.get(0))
+            .query_row(
+                "SELECT value FROM privacy_settings WHERE key = ?1",
+                [key],
+                |row| row.get(0),
+            )
             .optional()
     }
 }
@@ -170,15 +186,24 @@ mod tests {
     #[test]
     fn defaults_round_trip() {
         let s = storage();
-        assert_eq!(s.get_privacy_settings().unwrap(), PrivacySettings::default());
+        assert_eq!(
+            s.get_privacy_settings().unwrap(),
+            PrivacySettings::default()
+        );
         let settings = s.get_privacy_settings().unwrap();
-        s.set_privacy_setting("tracking_protection_enabled", "false").unwrap();
+        s.set_privacy_setting("tracking_protection_enabled", "false")
+            .unwrap();
         s.set_privacy_setting("https_only_mode", "true").unwrap();
         let updated = s.get_privacy_settings().unwrap();
         assert!(!updated.tracking_protection_enabled);
         assert!(updated.https_only_mode);
-        s.set_privacy_setting("tracking_protection_enabled", "true").unwrap();
-        assert!(s.get_privacy_settings().unwrap().tracking_protection_enabled);
+        s.set_privacy_setting("tracking_protection_enabled", "true")
+            .unwrap();
+        assert!(
+            s.get_privacy_settings()
+                .unwrap()
+                .tracking_protection_enabled
+        );
         assert!(settings.block_third_party_cookies);
     }
 
@@ -196,19 +221,41 @@ mod tests {
         s.set_privacy_setting("do_not_track", "true").unwrap();
         s.set_privacy_setting("https_only_mode", "true").unwrap();
         s.reset_to_defaults().unwrap();
-        assert_eq!(s.get_privacy_settings().unwrap(), PrivacySettings::default());
+        assert_eq!(
+            s.get_privacy_settings().unwrap(),
+            PrivacySettings::default()
+        );
     }
 
     #[test]
     fn clear_browsing_data_wipes_history_cookies_and_cache() {
         let s = storage();
-        s.record_history_visit("https://example.test", "Example", None).unwrap();
-        s.set_cookie(None, "example.test", "session", "secret").unwrap();
-        s.record_cache_entry(None, "https://example.test/a", 10).unwrap();
-        let result = s.clear_browsing_data(1234, ClearDataOptions {
-            cookies: true, cache: true, history: true, container_id: None,
-        }).unwrap();
-        assert_eq!(result, ClearDataResult { cookies: 1, cache: 1, history: 1, cleared_at_epoch_ms: 1234 });
+        s.record_history_visit("https://example.test", "Example", None)
+            .unwrap();
+        s.set_cookie(None, "example.test", "session", "secret")
+            .unwrap();
+        s.record_cache_entry(None, "https://example.test/a", 10)
+            .unwrap();
+        let result = s
+            .clear_browsing_data(
+                1234,
+                ClearDataOptions {
+                    cookies: true,
+                    cache: true,
+                    history: true,
+                    container_id: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            ClearDataResult {
+                cookies: 1,
+                cache: 1,
+                history: 1,
+                cleared_at_epoch_ms: 1234
+            }
+        );
         assert!(s.recent_history(10, None).unwrap().is_empty());
         assert!(s.cookies_for(None).unwrap().is_empty());
         assert!(s.cache_entries_for(None).unwrap().is_empty());
@@ -217,13 +264,19 @@ mod tests {
     #[test]
     fn shutdown_cleanup_only_clears_selected_categories() {
         let s = storage();
-        s.record_history_visit("https://example.test", "Example", None).unwrap();
-        s.set_cookie(None, "example.test", "session", "secret").unwrap();
-        s.record_cache_entry(None, "https://example.test/a", 10).unwrap();
+        s.record_history_visit("https://example.test", "Example", None)
+            .unwrap();
+        s.set_cookie(None, "example.test", "session", "secret")
+            .unwrap();
+        s.record_cache_entry(None, "https://example.test/a", 10)
+            .unwrap();
         s.set_privacy_setting("clear_on_exit", "true").unwrap();
-        s.set_privacy_setting("clear_cookies_on_exit", "true").unwrap();
-        s.set_privacy_setting("clear_cache_on_exit", "false").unwrap();
-        s.set_privacy_setting("clear_history_on_exit", "true").unwrap();
+        s.set_privacy_setting("clear_cookies_on_exit", "true")
+            .unwrap();
+        s.set_privacy_setting("clear_cache_on_exit", "false")
+            .unwrap();
+        s.set_privacy_setting("clear_history_on_exit", "true")
+            .unwrap();
         let result = s.apply_shutdown_cleanup().unwrap();
         assert_eq!((result.cookies, result.cache, result.history), (1, 0, 1));
         assert!(s.cookies_for(None).unwrap().is_empty());

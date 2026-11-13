@@ -1,7 +1,7 @@
 //! SQLite storage primitives for bookmarks, history, tabs, and containers.
 
 #[cfg(feature = "storage")]
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result, params};
 
 #[cfg(feature = "storage")]
 pub struct StorageEngine {
@@ -61,7 +61,14 @@ impl StorageEngine {
         Ok(())
     }
 
-    pub fn insert_bookmark(&self, id: &str, url: &str, title: &str, folder: Option<&str>, created_at: u64) -> Result<()> {
+    pub fn insert_bookmark(
+        &self,
+        id: &str,
+        url: &str,
+        title: &str,
+        folder: Option<&str>,
+        created_at: u64,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO bookmarks (id, url, title, folder, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id, url, title, folder, created_at],

@@ -1,7 +1,7 @@
 //! Native Compositor and Surface manager for WebRender / Servo rendering in CraftBrowsing.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::info;
 
 /// Surface dimensions and high-DPI scaling configuration.
