@@ -126,9 +126,10 @@ impl Storage {
         let current: Option<i64> = self
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-                row.get(0)
+                row.get::<_, Option<i64>>(0)
             })
             .optional()?
+            .flatten()
             .filter(|v| *v >= 1);
 
         if current.is_none() {

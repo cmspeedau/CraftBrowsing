@@ -256,7 +256,7 @@ mod tests {
                 cleared_at_epoch_ms: 1234
             }
         );
-        assert!(s.recent_history(10, None).unwrap().is_empty());
+        assert!(s.list_history(None, 10).unwrap().is_empty());
         assert!(s.cookies_for(None).unwrap().is_empty());
         assert!(s.cache_entries_for(None).unwrap().is_empty());
     }
@@ -281,6 +281,6 @@ mod tests {
         assert_eq!((result.cookies, result.cache, result.history), (1, 0, 1));
         assert!(s.cookies_for(None).unwrap().is_empty());
         assert_eq!(s.cache_entries_for(None).unwrap().len(), 1);
-        assert!(s.recent_history(10, None).unwrap().is_empty());
+        assert!(s.list_history(None, 10).unwrap().is_empty());
     }
 }
