@@ -74,10 +74,10 @@ jobs:
 
       - name: Install AppImage tools
         run: |
+          sudo apt-get update
+          sudo apt-get install -y zsync
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool
           chmod +x /tmp/appimagetool
-          wget -q https://github.com/AppImage/zsync/releases/download/continuous/zsyncmake-x86_64.AppImage -O /tmp/zsyncmake || true
-          chmod +x /tmp/zsyncmake 2>/dev/null || true
 
       - name: Build AppImage
         run: |
@@ -94,15 +94,11 @@ jobs:
           X-AppImage-UpdateInformation=zsync|https://github.com/cmspeedau/CraftBrowsing/releases/latest/download/CraftBrowsing-x86_64.AppImage.zsync
           EOF
           cp AppDir/craft-browsing.desktop AppDir/usr/share/applications/
-          /tmp/appimagetool AppDir CraftBrowsing-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 /tmp/appimagetool AppDir CraftBrowsing-x86_64.AppImage
 
       - name: Generate zsync metadata
         run: |
-          if [ -x /tmp/zsyncmake ]; then
-            /tmp/zsyncmake CraftBrowsing-x86_64.AppImage
-          else
-            echo "zsyncmake not available; skipping delta metadata"
-          fi
+          zsyncmake CraftBrowsing-x86_64.AppImage
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
