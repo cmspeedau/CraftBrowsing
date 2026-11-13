@@ -2,6 +2,7 @@
 
 use adblock::Engine;
 use adblock::lists::{FilterSet, ParseOptions};
+use adblock::request::Request;
 use std::sync::RwLock;
 
 pub struct AdblockManager {
@@ -49,7 +50,11 @@ impl AdblockManager {
         }
 
         let engine = self.engine.read().unwrap();
-        let blocker_result = engine.check_network_urls(url, source_url, request_type);
+        let request = match Request::new(url, source_url, request_type) {
+            Ok(request) => request,
+            Err(_) => return false,
+        };
+        let blocker_result = engine.check_network_request(&request);
         blocker_result.matched
     }
 }

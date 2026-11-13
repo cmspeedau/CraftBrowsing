@@ -1,0 +1,177 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-release-${{ matrix.target }}-
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev pkg-config
+
+      - name: Build release binary
+        run: cargo build --release -p craft-ui --target ${{ matrix.target }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: craft-ui-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/craft-ui*
+
+  package-linux:
+    name: Package Linux AppImage
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: craft-ui-x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: Install AppImage tools
+        run: |
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool
+          chmod +x /tmp/appimagetool
+          wget -q https://github.com/AppImage/zsync/releases/download/continuous/zsyncmake-x86_64.AppImage -O /tmp/zsyncmake || true
+          chmod +x /tmp/zsyncmake 2>/dev/null || true
+
+      - name: Build AppImage
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp dist/craft-ui* AppDir/usr/bin/craft-browsing
+          chmod +x AppDir/usr/bin/craft-browsing
+          cat > AppDir/craft-browsing.desktop <<'EOF'
+          [Desktop Entry]
+          Name=CraftBrowsing
+          Exec=craft-browsing
+          Icon=craft-browsing
+          Type=Application
+          Categories=Network;WebBrowser;
+          X-AppImage-UpdateInformation=zsync|https://github.com/cmspeedau/CraftBrowsing/releases/latest/download/CraftBrowsing-x86_64.AppImage.zsync
+          EOF
+          cp AppDir/craft-browsing.desktop AppDir/usr/share/applications/
+          /tmp/appimagetool AppDir CraftBrowsing-x86_64.AppImage
+
+      - name: Generate zsync metadata
+        run: |
+          if [ -x /tmp/zsyncmake ]; then
+            /tmp/zsyncmake CraftBrowsing-x86_64.AppImage
+          else
+            echo "zsyncmake not available; skipping delta metadata"
+          fi
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: |
+            CraftBrowsing-x86_64.AppImage
+            CraftBrowsing-x86_64.AppImage.zsync
+
+  package-windows:
+    name: Package Windows
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: craft-ui-x86_64-pc-windows-msvc
+          path: dist
+
+      - name: Stage executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          Copy-Item dist/craft-ui*.exe staging/craft-browsing.exe -ErrorAction SilentlyContinue
+          if (-not (Test-Path staging/craft-browsing.exe)) { Get-ChildItem dist }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: staging/craft-browsing.exe
+
+  package-macos:
+    name: Package macOS DMG
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS binary
+        uses: actions/download-artifact@v4
+        with:
+          name: craft-ui-aarch64-apple-darwin
+          path: dist
+
+      - name: Create app bundle
+        run: |
+          mkdir -p "CraftBrowsing.app/Contents/MacOS" "CraftBrowsing.app/Contents/Resources"
+          cp dist/craft-ui* "CraftBrowsing.app/Contents/MacOS/CraftBrowsing"
+          chmod +x "CraftBrowsing.app/Contents/MacOS/CraftBrowsing"
+          cat > "CraftBrowsing.app/Contents/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>CraftBrowsing</string>
+            <key>CFBundleExecutable</key><string>CraftBrowsing</string>
+            <key>CFBundleIdentifier</key><string>dev.craftbrowsing.app</string>
+            <key>CFBundleVersion</key><string>0.1.0</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "CraftBrowsing" -srcfolder "CraftBrowsing.app" -ov -format UDZO "CraftBrowsing-aarch64.dmg"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: CraftBrowsing-aarch64.dmg

@@ -12,7 +12,7 @@ impl PluginRuntime {
         Self { js_runtime }
     }
 
-    pub fn execute_script(&mut self, script_name: &str, code: &str) -> Result<(), String> {
+    pub fn execute_script(&mut self, script_name: &'static str, code: &str) -> Result<(), String> {
         self.js_runtime
             .execute_script(script_name, code.to_string())
             .map(|_| ())

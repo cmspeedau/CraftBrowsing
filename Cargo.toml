@@ -25,3 +25,5 @@ adblock = "0.9"
 winit = "0.30"
 dirs = "5"
 thiserror = "2"
+rmp = "=0.8.14"
+

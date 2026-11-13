@@ -99,8 +99,6 @@ impl ServoEngine {
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<EngineCommand>();
         let (event_tx, event_rx) = mpsc::unbounded_channel::<EngineEvent>();
 
-        let adblock_filter = adblock.clone();
-
         // Spawn Servo engine event loop worker thread
         std::thread::Builder::new()
             .name("servo-engine-worker".into())
@@ -116,12 +114,6 @@ impl ServoEngine {
                                 url: url.clone(),
                                 status_code: None,
                             }));
-
-                            // Perform adblock pre-flight check on initial navigation
-                            let should_block = adblock_filter.should_block(&url, &url, "document");
-                            if should_block {
-                                warn!("Adblock intercepted top-level navigation: {}", url);
-                            }
 
                             let _ = event_tx.send(EngineEvent::Navigation(NavigationEvent {
                                 tab_id,
