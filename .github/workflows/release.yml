@@ -176,3 +176,34 @@ jobs:
         with:
           name: macos-dmg
           path: CraftBrowsing-aarch64.dmg
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [package-linux, package-windows, package-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          cp artifacts/linux-appimage/CraftBrowsing-x86_64.AppImage release/
+          cp artifacts/linux-appimage/CraftBrowsing-x86_64.AppImage.zsync release/
+          cp artifacts/windows-exe/craft-browsing.exe release/CraftBrowsing-x86_64.exe
+          cp artifacts/macos-dmg/CraftBrowsing-aarch64.dmg release/
+          ls -l release
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CraftBrowsing ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*
+          fail_on_unmatched_files: true
