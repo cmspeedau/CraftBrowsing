@@ -21,7 +21,7 @@ CraftBrowsing is a next-generation, highly customizable web browser built on Ser
 - [x] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
 - [x] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
 - [x] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
-- [ ] CI/CD release matrix for Windows (`.exe`/`.msix`), macOS (`.dmg`), and Linux AppImage with `zsync` (`docs/releases-and-packaging.md`).
+- [x] CI/CD release matrix for Windows (`.exe`/`.msix`), macOS (`.dmg`), and Linux AppImage with `zsync` (`docs/releases-and-packaging.md`).
 
 ### v0.2.0 — Phase 2: Developer Tools, Media Hub, PWAs & Hardware Flashing
 - [ ] **Global Media Hub & PiP Scrubber (`docs/media-hub.md`):**
