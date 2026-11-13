@@ -81,9 +81,14 @@ jobs:
 
       - name: Build AppImage
         run: |
-          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications \
+            AppDir/usr/share/icons/hicolor/scalable/apps \
+            AppDir/usr/share/icons/hicolor/256x256/apps
           cp dist/craft-ui AppDir/usr/bin/craft-browsing
           chmod +x AppDir/usr/bin/craft-browsing
+          cp assets/craft-browsing.svg AppDir/craft-browsing.svg
+          cp assets/craft-browsing.svg AppDir/usr/share/icons/hicolor/scalable/apps/craft-browsing.svg
+          cp assets/craft-browsing.svg AppDir/usr/share/icons/hicolor/256x256/apps/craft-browsing.svg
           cat > AppDir/craft-browsing.desktop <<'EOF'
           [Desktop Entry]
           Name=CraftBrowsing
