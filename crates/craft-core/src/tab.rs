@@ -53,6 +53,11 @@ impl Tab {
         }
     }
 
+    pub fn navigate(&mut self, url: impl Into<String>) {
+        self.url = url.into();
+        self.state = TabState::Active;
+    }
+
     pub fn hibernate(&mut self) {
         self.state = TabState::Hibernated;
     }

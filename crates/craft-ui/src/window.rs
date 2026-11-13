@@ -84,6 +84,11 @@ impl BrowserWindowApp {
     }
 }
 
+/// Run the native window event loop with a freshly constructed browser shell.
+pub fn run_window_event_loop() -> Result<(), Box<dyn std::error::Error>> {
+    BrowserWindowApp::run()
+}
+
 impl ApplicationHandler for BrowserWindowApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
@@ -128,7 +133,12 @@ impl ApplicationHandler for BrowserWindowApp {
             }
             WindowEvent::Resized(physical_size) => {
                 if let Some(surface) = self.surface.as_mut() {
-                    surface.resize(physical_size.width, physical_size.height);
+                    let scale_factor = self
+                        .window
+                        .as_ref()
+                        .map(|window| window.scale_factor())
+                        .unwrap_or(1.0);
+                    surface.resize(physical_size.width, physical_size.height, scale_factor);
                     info!(
                         "Native surface resized to {}x{}",
                         physical_size.width, physical_size.height
@@ -171,7 +181,7 @@ impl ApplicationHandler for BrowserWindowApp {
         }
     }
 
-    fn about_to_wait(&mut self) {
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         // Continuous engine event drain and frame trigger
         let _ = self.app.poll_engine_events();
         if let Some(window) = self.window.as_ref() {

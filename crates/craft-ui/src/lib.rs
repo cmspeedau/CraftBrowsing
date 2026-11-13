@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
 
-pub use omnibox::{Omnibox, OmniboxAction, OmniboxState, SearchEngine};
+pub use omnibox::{OmniboxState, OmniboxTarget};
 pub use tab_manager::{TabNode, TabState, VerticalTabManager};
 pub use window::{BrowserWindowApp, run_window_event_loop};
 
@@ -28,7 +28,7 @@ pub struct BrowserApp {
     pub plugin_runtime: PluginRuntime,
     pub engine: ServoEngine,
     pub cmd_sender: mpsc::UnboundedSender<EngineCommand>,
-    pub omnibox: Omnibox,
+    pub omnibox: OmniboxState,
     pub tab_manager: VerticalTabManager,
 }
 
@@ -39,7 +39,7 @@ impl BrowserApp {
         let adblock = Arc::new(AdblockManager::new());
         let sync_preferences = SyncPreferences::default();
         let plugin_runtime = PluginRuntime::new();
-        let omnibox = Omnibox::default();
+        let omnibox = OmniboxState::new("", ContainerId::default_container());
         let tab_manager = VerticalTabManager::new();
 
         let (engine, cmd_sender) = ServoEngine::new(adblock.clone());
@@ -91,11 +91,11 @@ impl BrowserApp {
 
     /// Submit omnibox input: parse URL or search query and navigate active tab.
     pub fn submit_omnibox(&mut self, input: &str) {
-        let action = self.omnibox.resolve(input);
+        let action = OmniboxState::resolve_input(input);
         let target_url = match action {
-            OmniboxAction::Navigate(url) => url,
-            OmniboxAction::Search { query, engine } => engine.search_url(&query),
-            OmniboxAction::InternalPage(page) => page,
+            OmniboxTarget::Url(url) => url,
+            OmniboxTarget::Search { resolved_url, .. } => resolved_url,
+            OmniboxTarget::Internal(page) => page,
         };
 
         if let Some(active_id) = self.active_tab_id.clone() {
@@ -112,15 +112,18 @@ impl BrowserApp {
             self.tab_manager.active_tab_id = Some(tab_id.clone());
 
             // If tab was hibernated, wake it up in the rendering engine
-            if let Some(node) = self.tab_manager.get_node_mut(tab_id) {
+            let wake_info = self.tab_manager.get_node(tab_id).and_then(|node| {
                 if node.state == TabState::Hibernated {
-                    self.tab_manager.wake_tab(tab_id);
-                    self.engine.create_context(
-                        tab_id.clone(),
-                        node.container_id.clone(),
-                        &node.url,
-                    );
+                    Some((node.container_id.clone(), node.url.clone()))
+                } else {
+                    None
                 }
+            });
+
+            if let Some((container_id, url)) = wake_info {
+                self.tab_manager.wake_tab(tab_id);
+                self.engine
+                    .create_context(tab_id.clone(), container_id, &url);
             }
         }
     }

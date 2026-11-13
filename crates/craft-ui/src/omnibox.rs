@@ -39,6 +39,11 @@ impl OmniboxState {
         }
     }
 
+    /// Update the address bar text shown for the active tab.
+    pub fn set_text(&mut self, text: &str) {
+        self.input_text = text.to_string();
+    }
+
     /// Resolve an arbitrary user string into a valid navigation target.
     pub fn resolve_input(input: &str) -> OmniboxTarget {
         let trimmed = input.trim();

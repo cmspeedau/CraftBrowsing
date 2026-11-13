@@ -66,6 +66,17 @@ impl CompositorSurface {
         }
     }
 
+    /// Update the surface scale factor without changing the physical size.
+    pub fn update_scale_factor(&mut self, scale_factor: f64) {
+        self.resize(self.metrics.width, self.metrics.height, scale_factor);
+    }
+
+    /// Present the current surface contents. This is a placeholder for the
+    /// platform compositor backend; it clears the dirty flag for the frame.
+    pub fn present(&self) {
+        let _ = self.take_dirty();
+    }
+
     /// Mark surface as needing repaint.
     pub fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::Release);

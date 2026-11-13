@@ -177,14 +177,24 @@ impl VerticalTabManager {
         }
 
         // Reparent children to the removed tab's parent
+        let child_ids: Vec<TabId> = self
+            .nodes
+            .iter()
+            .filter(|node| node.parent_tab_id.as_ref() == Some(tab_id))
+            .map(|node| node.id.clone())
+            .collect();
+
         for node in self.nodes.iter_mut() {
-            if node.parent_tab_id.as_ref() == Some(tab_id) {
+            if child_ids.contains(&node.id) {
                 node.parent_tab_id = parent_id.clone();
-                if let Some(ref pid) = parent_id {
-                    if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
-                        if !parent.child_tab_ids.contains(&node.id) {
-                            parent.child_tab_ids.push(node.id.clone());
-                        }
+            }
+        }
+
+        if let Some(ref pid) = parent_id {
+            if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
+                for child in child_ids {
+                    if !parent.child_tab_ids.contains(&child) {
+                        parent.child_tab_ids.push(child);
                     }
                 }
             }
