@@ -1,5 +1,9 @@
 # Basic Download Manager Specification
 
+> Note: Direct HTTP(S) downloads are being superseded by the unified transfer
+> engine in `docs/transfers.md` (v0.5.0), which adds 4-part segmented HTTP
+> downloads and magnet/torrent support. This document remains the baseline for
+> container awareness, safety checks, and the `craft://downloads` UI.
 CraftBrowsing includes a built-in, lightweight, memory-safe download manager designed for transparency, security, and container awareness.
 
 ---

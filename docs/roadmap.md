@@ -70,3 +70,35 @@ CraftBrowsing is a next-generation, highly customizable web browser built on Ser
   - [ ] Anti-fingerprinting defenses (canvas blunting, audio context jitter, font enumeration shielding).
   - [ ] Built-in DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) resolver selector with zero-log presets (Quad9, Mullvad).
 - [ ] In-browser auto-update background worker integration for Windows, macOS, and Linux AppImage zsync.
+
+### v0.5.0 — Phase 5: Built-in Transfer Engine (Magnet + Segmented HTTP)
+- [ ] **Vendor torrenter core modules into `craft-transfers`:**
+  - [ ] Add `craft-transfers` crate to the workspace.
+  - [ ] Vendor and adapt `validate`, `paths`, `progress`, and job-state helpers.
+  - [ ] Vendor segmented HTTP downloader (4-part byte-range resume).
+  - [ ] Vendor magnet/torrent engine (librqbit, DHT in memory only).
+- [ ] **Unified transfer lifecycle:**
+  - [ ] Start, pause, resume, stop, restart, clear.
+  - [ ] Concurrency cap (default 4) with queued jobs.
+  - [ ] Restore jobs across browser restarts with missing-file detection.
+- [ ] **Storage & schema:**
+  - [ ] Bump schema to v5 with unified transfer records.
+  - [ ] Persist magnet info hashes, seed mode, container ID, and resume metadata.
+  - [ ] Transfer settings (default dir, concurrency, seed default, DHT, port range).
+- [ ] **Container awareness:**
+  - [ ] Tag every transfer with its originating container.
+  - [ ] Filter `craft://downloads` by container.
+  - [ ] Preserve container cookie/proxy heritage for HTTP transfers.
+- [ ] **Privacy & security controls:**
+  - [ ] Leech mode by default; Share mode explicit opt-in.
+  - [ ] DHT in memory only; no peer persistence.
+  - [ ] User-gesture + confirmation for magnet links.
+  - [ ] Clear-on-exit and private-browsing handling for transfer history.
+- [ ] **UI:**
+  - [ ] Extend `craft://downloads` with HTTP/MAGNET badges, peers, speed, ETA.
+  - [ ] Toolbar download indicator for all transfer kinds.
+  - [ ] Magnet link interception prompt.
+- [ ] **Documentation:**
+  - [ ] `docs/transfers.md`
+  - [ ] Update `docs/downloads.md`, `docs/architecture.md`, and security docs.
+- [ ] Explicitly out of scope for this milestone: torrenter MCP server integration.

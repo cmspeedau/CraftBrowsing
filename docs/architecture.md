@@ -12,7 +12,8 @@ CraftBrowsing/
 │   ├── craft-app/           # Main entry point & window management (Iced / Slint)
 │   ├── craft-engine/         # Servo engine embedding & WebRender bindings
 │   ├── craft-adblock/        # Adblock rule engine (brave/adblock crate)
-│   ├── craft-downloads/      # Download manager (HTTP Range, pause/resume, stream writes)
+│   ├── craft-downloads/      # Legacy HTTP download manager (being superseded by craft-transfers)
+│   ├── craft-transfers/      # Unified transfer engine: segmented HTTP + magnet/torrent (v0.5.0)
 │   ├── craft-hardware/       # Hardware device access (WebSerial, WebUSB, WebHID, WebBLE)
 │   ├── craft-pwa/            # Progressive Web App manager, manifest parser & OS shortcuts
 │   ├── craft-devtools/       # Web Developer Tools (DOM inspector, network, console, storage)
@@ -33,8 +34,8 @@ CraftBrowsing/
 | **Rendering & DOM** | [Servo](https://servo.org/) / WebRender | Parallelized, pure-Rust layout, HTML parsing, and GPU rendering |
 | **Browser Chrome (UI)** | [Iced](https://github.com/iced-rs/iced) or [Slint](https://slint.dev/) | High-performance, GPU-accelerated declarative UI |
 | **Ad-Blocking** | [`adblock-rust`](https://github.com/brave/adblock-rust) | Sub-millisecond URL filtering matching uBlock / Brave rulesets |
-| **Download Manager** | `craft-downloads` (`tokio::io`, `reqwest`) | Resumable chunked file transfers, container proxy/cookie context, and `.part` streaming |
-| **Hardware & Flashing** | `craft-hardware` (`serialport`, `rusb`, `hidapi-rs`) | Opt-in, zero-trust WebSerial, WebUSB, and WebHID device flashing & serial debugging |
+| **Download Manager** | `craft-downloads` (`tokio::io`, `reqwest`) | Legacy HTTP downloads; being superseded by `craft-transfers` |
+| **Transfer Engine** | `craft-transfers` (`librqbit`, `reqwest`, `tokio`) | Segmented HTTP (4-part byte-range resume) + magnet/torrent downloads, container-aware, leech-by-default (v0.5.0) || **Hardware & Flashing** | `craft-hardware` (`serialport`, `rusb`, `hidapi-rs`) | Opt-in, zero-trust WebSerial, WebUSB, and WebHID device flashing & serial debugging |
 | **Progressive Web Apps** | `craft-pwa` | W3C manifest parsing, chromeless standalone windows, and OS desktop shortcuts |
 | **Developer Tools** | `craft-devtools` / Chrome DevTools Protocol (CDP) | Native DOM/CSS inspector, console repl, network waterfall, and storage inspector |
 | **Extension Runtime** | [Boa Engine](https://github.com/boa-dev/boa) / [Deno Core](https://github.com/denoland/deno_core) | Secure, sandboxed JavaScript runtime for extension background scripts |
