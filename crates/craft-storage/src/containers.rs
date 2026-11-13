@@ -66,7 +66,7 @@ impl Storage {
     // -- Container identities ------------------------------------------------
 
     /// Create a new container identity and return its `UserContextId`.
-    pub fn create_container(name: &str, color_hex: &str, icon: &str) -> SqlResult<i64> {
+    pub fn create_container(&self, name: &str, color_hex: &str, icon: &str) -> SqlResult<i64> {
         self.conn.execute(
             "INSERT INTO containers (name, color_hex, icon, created_at_epoch_ms)
              VALUES (?1, ?2, ?3, ?4)",
