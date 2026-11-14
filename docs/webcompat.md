@@ -10,8 +10,8 @@ features.
 
 Compiled from on-device runs captured in the browser log, which now includes page
 console output and pipeline crashes via `WebViewDelegate::show_console_message`
-and `notify_crashed` (see commit `19b9ac5`). Sites exercised so far: Facebook and
-ABC News (`abc.com.au` -> `www.abc.net.au`).
+and `notify_crashed` (see commit `19b9ac5`). Sites exercised so far: Facebook,
+ABC News (`abc.com.au` -> `www.abc.net.au`), and YouTube.
 
 Caveat: "Unsupported property declaration" lines are what Stylo emitted while
 parsing these specific pages. A single invalid selector can cause the whole rule
@@ -78,21 +78,38 @@ already be partly supported and were dropped here only because the enclosing rul
 failed to parse. Treat the list as "seen missing on these pages", and verify
 before prioritizing.
 
-## Network stack (transient, watch)
+## Network stack (load-breaking, confirmed)
 
-- One HTTP/2 stream reset observed: `hyper Error(Http2, PROTOCOL_ERROR, Reset
-  StreamId(1))` during an ABC session, surfacing as `script_thread: Network error:
-  HTTP failure: client error (SendRequest)`. Single occurrence, not reproduced yet.
-  Action: watch for HTTP/2 reset patterns across sites; file upstream if it becomes
-  reproducible rather than a one-off server reset.
+- HTTP/2 request stream reset on Google properties.
+  - Symptom: top-level navigation to `www.youtube.com` fails with
+    `Could not load the requested page: client error (SendRequest)`. Log:
+    `hyper Error(Http2, Error { kind: Reset(StreamId(1), PROTOCOL_ERROR, Library) })`
+    on the first request stream, immediately after the `youtube.com` ->
+    `www.youtube.com` 301. The same signature also killed an ABC request. So it
+    is a repeating failure on HTTP/2 servers that enforce strict framing, not a
+    one-off.
+  - Where: `servo-net` builds the client with `.enable_http1().enable_http2()`
+    (`connector.rs::create_http_client`), and ALPN selects h2. The only code that
+    pins ALPN to `http/1.1` is the WebSocket handshake path
+    (`http_loader.rs:2229`), so normal navigation has no h2->h1 fallback.
+  - Embedder options: none exposed via `Opts`/preferences. There is no supported
+    way to force HTTP/1.1 from `craft-*`. A workaround would require vendoring or
+    patching `servo-net` to disable HTTP/2 (drop `.enable_http2()`), which is not
+    something to do lightly.
+  - Action: upstream. This is a Servo/rustls/h2 conformance issue against Google's
+    h2 servers. Repro steps: load `youtube.com` (and `www.google.com`) with
+    `RUST_LOG=info` and grep `PROTOCOL_ERROR`.
 
-## Per-site summary (so far)
+## Per-site summary
 
 - Facebook (Login): loads and renders. `:has()` and vendor pseudo-elements dropped
   -> minor visual gaps. Not load-breaking.
 - ABC News (Next.js): loads the document, then `IntersectionObserver` is
   undefined -> client-side exception -> site error page. Load-breaking. Root cause
   is a missing DOM API, not CSS.
+- YouTube: does not load at all. HTTP/2 stream reset on the main document
+  (`PROTOCOL_ERROR`). Load-breaking. Root cause is the engine's HTTP/2 path, not
+  our embedder and not CSS/JS.
 
 ## Re-check procedure
 
@@ -101,4 +118,5 @@ before prioritizing.
 2. Grep the new log the same way this file was built:
    `SelectorError`, `Unsupported property`, `page console] Error`, `PROTOCOL_ERROR`.
 3. Diff against this list; remove items Servo now supports, add new gaps.
-4. Link findings to Servo issues; do not implement polyfills in `craft-*`.
+4. Link findings to Servo issues; do not implement polyfills or forced-protocol
+   hacks in `craft-*`.
