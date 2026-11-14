@@ -10,7 +10,7 @@ use craft_core::tab::TabId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 pub use compositor::CompositorSurface;
 pub use events::{EngineEvent, NavigationEvent, PageLoadState};
@@ -89,6 +89,9 @@ pub struct ServoEngine {
     cmd_sender: mpsc::UnboundedSender<EngineCommand>,
     event_receiver: mpsc::UnboundedReceiver<EngineEvent>,
     contexts: HashMap<TabId, EngineContext>,
+    // Reserved for the Servo resource-interception integration; not read by the
+    // simulated engine yet.
+    #[allow(dead_code)]
     adblock: Arc<AdblockManager>,
 }
 
@@ -221,10 +224,10 @@ impl ServoEngine {
     pub fn poll_events(&mut self) -> Vec<EngineEvent> {
         let mut events = Vec::new();
         while let Ok(event) = self.event_receiver.try_recv() {
-            if let EngineEvent::Navigation(ref nav) = event {
-                if let Some(ctx) = self.contexts.get_mut(&nav.tab_id) {
-                    ctx.load_state = nav.state.clone();
-                }
+            if let EngineEvent::Navigation(ref nav) = event
+                && let Some(ctx) = self.contexts.get_mut(&nav.tab_id)
+            {
+                ctx.load_state = nav.state.clone();
             }
             events.push(event);
         }

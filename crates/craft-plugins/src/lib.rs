@@ -11,7 +11,15 @@ impl PluginRuntime {
         let js_runtime = JsRuntime::new(RuntimeOptions::default());
         Self { js_runtime }
     }
+}
 
+impl Default for PluginRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PluginRuntime {
     pub fn execute_script(&mut self, script_name: &'static str, code: &str) -> Result<(), String> {
         self.js_runtime
             .execute_script(script_name, code.to_string())

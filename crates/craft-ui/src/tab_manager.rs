@@ -132,12 +132,11 @@ impl VerticalTabManager {
             }
         }
 
-        if let Some(ref pid) = parent_id {
-            if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
-                if !parent.child_tab_ids.contains(&tab_id) {
-                    parent.child_tab_ids.push(tab_id.clone());
-                }
-            }
+        if let Some(ref pid) = parent_id
+            && let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid)
+            && !parent.child_tab_ids.contains(&tab_id)
+        {
+            parent.child_tab_ids.push(tab_id.clone());
         }
 
         self.active_tab_id = Some(tab_id);
@@ -170,10 +169,10 @@ impl VerticalTabManager {
             .and_then(|n| n.parent_tab_id.clone());
 
         // Remove from parent's children list
-        if let Some(ref pid) = parent_id {
-            if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
-                parent.child_tab_ids.retain(|c| c != tab_id);
-            }
+        if let Some(ref pid) = parent_id
+            && let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid)
+        {
+            parent.child_tab_ids.retain(|c| c != tab_id);
         }
 
         // Reparent children to the removed tab's parent
@@ -190,12 +189,12 @@ impl VerticalTabManager {
             }
         }
 
-        if let Some(ref pid) = parent_id {
-            if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid) {
-                for child in child_ids {
-                    if !parent.child_tab_ids.contains(&child) {
-                        parent.child_tab_ids.push(child);
-                    }
+        if let Some(ref pid) = parent_id
+            && let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == pid)
+        {
+            for child in child_ids {
+                if !parent.child_tab_ids.contains(&child) {
+                    parent.child_tab_ids.push(child);
                 }
             }
         }
@@ -212,7 +211,7 @@ impl VerticalTabManager {
         let mut new_nodes = Vec::with_capacity(tabs.len());
 
         for tab in tabs {
-            let is_active = active_tab.map_or(false, |a| a == &tab.id);
+            let is_active = active_tab.is_some_and(|a| a == &tab.id);
             let mut node = TabNode::from_tab(tab, is_active);
 
             // Populate child tab ids
@@ -243,12 +242,11 @@ impl VerticalTabManager {
             }
         }
 
-        if child_found {
-            if let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == parent_id) {
-                if !parent.child_tab_ids.contains(child_id) {
-                    parent.child_tab_ids.push(child_id.clone());
-                }
-            }
+        if child_found
+            && let Some(parent) = self.nodes.iter_mut().find(|n| &n.id == parent_id)
+            && !parent.child_tab_ids.contains(child_id)
+        {
+            parent.child_tab_ids.push(child_id.clone());
         }
 
         child_found
@@ -263,19 +261,19 @@ impl VerticalTabManager {
 
     /// Mark a background tab as hibernated to conserve system memory.
     pub fn hibernate_tab(&mut self, tab_id: &TabId) {
-        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
-            if !node.is_active {
-                node.state = TabState::Hibernated;
-            }
+        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id)
+            && !node.is_active
+        {
+            node.state = TabState::Hibernated;
         }
     }
 
     /// Wake up a hibernated tab upon selection.
     pub fn wake_tab(&mut self, tab_id: &TabId) {
-        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id) {
-            if node.state == TabState::Hibernated {
-                node.state = TabState::Ready;
-            }
+        if let Some(node) = self.nodes.iter_mut().find(|n| &n.id == tab_id)
+            && node.state == TabState::Hibernated
+        {
+            node.state = TabState::Ready;
         }
     }
 
@@ -441,12 +439,10 @@ impl VerticalTabManager {
         };
         group.bound_container = container_id.clone();
 
-        if enforce_members {
-            if let Some(container) = container_id {
-                for node in self.nodes.iter_mut() {
-                    if node.group_id.as_ref() == Some(group_id) {
-                        node.container_id = container.clone();
-                    }
+        if enforce_members && let Some(container) = container_id {
+            for node in self.nodes.iter_mut() {
+                if node.group_id.as_ref() == Some(group_id) {
+                    node.container_id = container.clone();
                 }
             }
         }
@@ -526,7 +522,7 @@ impl VerticalTabManager {
         let group_hidden = node
             .group_id
             .as_ref()
-            .map_or(false, |gid| collapsed_groups.contains(gid));
+            .is_some_and(|gid| collapsed_groups.contains(gid));
 
         if !group_hidden {
             out.push(VisualTabItem {

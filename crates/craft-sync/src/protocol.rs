@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncPreferences {
     pub sync_enabled: bool,
     pub sync_bookmarks: bool,
@@ -9,20 +9,6 @@ pub struct SyncPreferences {
     pub sync_containers: bool,
     pub sync_block_lists: bool,
     pub sync_pwa_apps: bool,
-}
-
-impl Default for SyncPreferences {
-    fn default() -> Self {
-        Self {
-            sync_enabled: false,
-            sync_bookmarks: false,
-            sync_history: false,
-            sync_open_tabs: false,
-            sync_containers: false,
-            sync_block_lists: false,
-            sync_pwa_apps: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

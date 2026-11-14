@@ -17,17 +17,19 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 chacha20poly1305 = "0.10"
 argon2 = "0.5"
 deno_core = "0.300"
 adblock = "0.9"
 winit = "0.30"
-egui = "0.37"
-egui-winit = "0.37"
-egui_glow = { version = "0.37", features = ["winit", "x11", "wayland"] }
-glutin = "0.32"
-glutin-winit = "0.5"
+servo = "0.8.0"
+euclid = "0.22"
+url = "2.5"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
+egui = "0.34.3"
+egui-winit = { version = "0.34.3", default-features = false }
+egui_glow = { version = "0.34.3", default-features = false, features = ["winit", "x11", "wayland"] }
 glow = "0.17"
 dirs = "5"
 thiserror = "2"

@@ -1,161 +1,156 @@
-//! Native windowing and event loop integration for CraftBrowsing using winit + egui.
+//! Native windowing and event loop integration for CraftBrowsing using winit + Servo + egui.
 
+use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use egui_glow::winit::EguiGlow;
-use glutin::prelude::GlSurface;
+use egui_glow::EguiGlow;
+use euclid::Scale;
+
+use servo::{
+    EventLoopWaker, LoadStatus, OffscreenRenderingContext, RenderingContext, Servo, ServoBuilder,
+    WebView, WebViewBuilder, WebViewDelegate, WindowRenderingContext,
+};
 use tracing::info;
+use url::Url;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::raw_window_handle::HasWindowHandle;
+use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::BrowserApp;
+use crate::omnibox::{OmniboxState, OmniboxTarget};
 use craft_core::container::ContainerId;
 use craft_core::media::MediaAction;
 
-/// Owns the glutin GL context and window for one browser window.
-struct GlWindow {
+/// Custom user event used to wake the Servo event loop.
+#[derive(Debug)]
+struct WakerEvent;
+
+/// Live page state shared between the Servo delegate and the chrome.
+#[derive(Debug, Default)]
+struct PageState {
+    url: String,
+    title: String,
+    loading: bool,
+    can_go_back: bool,
+    can_go_forward: bool,
+}
+
+/// Delegate that forwards Servo frame-ready notifications to winit.
+struct BrowserWebViewDelegate {
     window: Arc<Window>,
-    gl_context: glutin::context::PossiblyCurrentContext,
-    gl_surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    gl: Arc<glow::Context>,
+    new_frame: Arc<AtomicBool>,
+    page: Arc<Mutex<PageState>>,
 }
 
-impl GlWindow {
-    unsafe fn new(event_loop: &ActiveEventLoop) -> Self {
-        use glutin::context::NotCurrentGlContext as _;
-        use glutin::display::GetGlDisplay as _;
-        use glutin::display::GlDisplay as _;
+impl WebViewDelegate for BrowserWebViewDelegate {
+    fn notify_new_frame_ready(&self, _: WebView) {
+        self.new_frame.store(true, Ordering::Release);
+        self.window.request_redraw();
+    }
 
-        let window_attributes = WindowAttributes::default()
-            .with_title("CraftBrowsing - Pure-Rust Servo Web Browser")
-            .with_inner_size(LogicalSize::new(1280.0, 720.0))
-            .with_visible(false);
+    fn notify_url_changed(&self, _: WebView, url: Url) {
+        self.page.lock().unwrap().url = url.to_string();
+        self.window.request_redraw();
+    }
 
-        let config_template = glutin::config::ConfigTemplateBuilder::new()
-            .prefer_hardware_accelerated(None)
-            .with_depth_size(0)
-            .with_stencil_size(0)
-            .with_transparency(false);
+    fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
+        self.page.lock().unwrap().title = title.unwrap_or_default();
+        self.window.request_redraw();
+    }
 
-        let (window, gl_config) = glutin_winit::DisplayBuilder::new()
-            .with_preference(glutin_winit::ApiPreference::FallbackEgl)
-            .with_window_attributes(Some(window_attributes.clone()))
-            .build(event_loop, config_template, |mut configs| {
-                configs.next().expect("no matching GL config")
-            })
-            .expect("failed to create GL config");
-
-        let gl_display = gl_config.display();
-
-        let raw_handle = window
-            .as_ref()
-            .and_then(|w| w.window_handle().ok())
-            .map(|h| h.as_raw());
-
-        let context_attributes = glutin::context::ContextAttributesBuilder::new().build(raw_handle);
-        let fallback_attributes = glutin::context::ContextAttributesBuilder::new()
-            .with_context_api(glutin::context::ContextApi::Gles(None))
-            .build(raw_handle);
-
-        let not_current = unsafe {
-            gl_display
-                .create_context(&gl_config, &context_attributes)
-                .unwrap_or_else(|_| {
-                    gl_display
-                        .create_context(&gl_config, &fallback_attributes)
-                        .expect("failed to create GL context")
-                })
-        };
-
-        let window = window.unwrap_or_else(|| {
-            glutin_winit::finalize_window(event_loop, window_attributes, &gl_config)
-                .expect("failed to finalize window")
-        });
-        let window = Arc::new(window);
-
-        let (width, height): (u32, u32) = window.inner_size().into();
-        let width = std::num::NonZeroU32::new(width.max(1)).unwrap();
-        let height = std::num::NonZeroU32::new(height.max(1)).unwrap();
-
-        let surface_attributes =
-            glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
-                .build(
-                    window.window_handle().expect("window handle").as_raw(),
-                    width,
-                    height,
-                );
-
-        let gl_surface = unsafe {
-            gl_display
-                .create_window_surface(&gl_config, &surface_attributes)
-                .expect("failed to create window surface")
-        };
-
-        let gl_context = not_current
-            .make_current(&gl_surface)
-            .expect("failed to make GL context current");
-
-        let _ = gl_surface.set_swap_interval(
-            &gl_context,
-            glutin::surface::SwapInterval::Wait(std::num::NonZeroU32::MIN),
-        );
-
-        let gl = unsafe {
-            glow::Context::from_loader_function(|s| {
-                let s = std::ffi::CString::new(s).expect("cstring");
-                gl_display.get_proc_address(&s)
-            })
-        };
-
-        Self {
-            window,
-            gl_context,
-            gl_surface,
-            gl: Arc::new(gl),
+    fn notify_load_status_changed(&self, webview: WebView, status: LoadStatus) {
+        {
+            let mut page = self.page.lock().unwrap();
+            page.loading = matches!(status, LoadStatus::Started | LoadStatus::HeadParsed);
+            page.can_go_back = webview.can_go_back();
+            page.can_go_forward = webview.can_go_forward();
         }
-    }
-
-    fn resize(&self, new_size: winit::dpi::PhysicalSize<u32>) {
-        use glutin::surface::GlSurface as _;
-        let width = std::num::NonZeroU32::new(new_size.width.max(1)).unwrap();
-        let height = std::num::NonZeroU32::new(new_size.height.max(1)).unwrap();
-        self.gl_surface.resize(&self.gl_context, width, height);
-    }
-
-    fn swap_buffers(&self) {
-        use glutin::surface::GlSurface as _;
-        let _ = self.gl_surface.swap_buffers(&self.gl_context);
+        self.window.request_redraw();
     }
 }
 
-/// Winit application runner embedding the CraftBrowsing browser shell and egui chrome.
+/// Waker that posts a user event to the winit event loop.
+#[derive(Clone)]
+struct WakerProxy(winit::event_loop::EventLoopProxy<WakerEvent>);
+
+impl EventLoopWaker for WakerProxy {
+    fn clone_box(&self) -> Box<dyn EventLoopWaker> {
+        Box::new(self.clone())
+    }
+
+    fn wake(&self) {
+        let _ = self.0.send_event(WakerEvent);
+    }
+}
+
+/// Winit application runner embedding the CraftBrowsing browser shell.
 pub struct BrowserWindowApp {
     app: BrowserApp,
-    gl_window: Option<GlWindow>,
+    window: Option<Arc<Window>>,
+    rendering_context: Option<Rc<WindowRenderingContext>>,
+    servo: Option<Servo>,
+    webview: Option<WebView>,
+    offscreen: Option<Rc<OffscreenRenderingContext>>,
     egui: Option<EguiGlow>,
+    new_frame: Arc<AtomicBool>,
+    page: Arc<Mutex<PageState>>,
+    omnibox_buffer: String,
     modifiers: ModifiersState,
+    initial_url: String,
+    event_proxy: Option<winit::event_loop::EventLoopProxy<WakerEvent>>,
 }
 
 impl BrowserWindowApp {
     pub fn new(app: BrowserApp) -> Self {
         Self {
             app,
-            gl_window: None,
+            window: None,
+            rendering_context: None,
+            servo: None,
+            webview: None,
+            offscreen: None,
             egui: None,
+            new_frame: Arc::new(AtomicBool::new(true)),
+            page: Arc::new(Mutex::new(PageState::default())),
+            omnibox_buffer: String::new(),
             modifiers: ModifiersState::empty(),
+            initial_url: "https://example.com".to_string(),
+            event_proxy: None,
         }
     }
 
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-        let event_loop = EventLoop::new()?;
-        event_loop.set_control_flow(ControlFlow::Poll);
+        // Install rustls crypto provider before anything touches TLS.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        // Content-process gate: if launched as a content process, run it and exit.
+        let mut token = None;
+        let mut take_next = false;
+        for arg in std::env::args() {
+            if take_next {
+                token = Some(arg);
+                break;
+            }
+            if arg == "--content-process" {
+                take_next = true;
+            }
+        }
+        if let Some(tok) = token {
+            servo::run_content_process(tok);
+            return Ok(());
+        }
+
+        let event_loop = EventLoop::with_user_event().build()?;
+        event_loop.set_control_flow(ControlFlow::Wait);
 
         let mut app_state = BrowserWindowApp::new(BrowserApp::new());
+        app_state.event_proxy = Some(event_loop.create_proxy());
         event_loop.run_app(&mut app_state)?;
 
         Ok(())
@@ -166,40 +161,105 @@ pub fn run_window_event_loop() -> Result<(), Box<dyn std::error::Error>> {
     BrowserWindowApp::run()
 }
 
-impl ApplicationHandler for BrowserWindowApp {
+impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.gl_window.is_none() {
-            let gl_window = unsafe { GlWindow::new(event_loop) };
+        if self.window.is_some() {
+            return;
+        }
 
-            let egui = EguiGlow::new(event_loop, Arc::clone(&gl_window.gl), None, None, true);
-            egui.egui_ctx.set_visuals(egui::Visuals::dark());
+        let window_attributes = WindowAttributes::default()
+            .with_title("CraftBrowsing - Pure-Rust Servo Web Browser")
+            .with_inner_size(LogicalSize::new(1280.0, 720.0));
 
-            gl_window.window.set_visible(true);
-            info!(
-                "Created native OS window: {}x{}",
-                gl_window.window.inner_size().width,
-                gl_window.window.inner_size().height
-            );
+        let window = Arc::new(
+            event_loop
+                .create_window(window_attributes)
+                .expect("failed to create window"),
+        );
 
-            self.gl_window = Some(gl_window);
-            self.egui = Some(egui);
+        let display_handle = event_loop.display_handle().expect("display handle");
+        let window_handle = window.window_handle().expect("window handle");
 
-            if self.app.tabs.is_empty() {
-                self.app
-                    .open_tab("craft://welcome", ContainerId::default_container());
-            }
+        let rendering_context = Rc::new(
+            WindowRenderingContext::new(display_handle, window_handle, window.inner_size())
+                .expect("failed to create rendering context"),
+        );
+        rendering_context.make_current().expect("make_current");
+
+        // Build Servo.
+        let proxy = self.event_proxy.clone().expect("event proxy");
+        let waker = WakerProxy(proxy);
+        let opts = servo::Opts {
+            multiprocess: false,
+            sandbox: false,
+            hard_fail: false,
+            temporary_storage: true,
+            ..Default::default()
+        };
+        let servo = ServoBuilder::default()
+            .opts(opts)
+            .event_loop_waker(Box::new(waker))
+            .build();
+
+        // Create offscreen context + webview.
+        let offscreen = Rc::new(rendering_context.offscreen_context(window.inner_size()));
+        let offscreen_rc: Rc<dyn RenderingContext> = offscreen.clone();
+
+        let delegate = Rc::new(BrowserWebViewDelegate {
+            window: window.clone(),
+            new_frame: self.new_frame.clone(),
+            page: self.page.clone(),
+        });
+
+        let url =
+            Url::parse(&self.initial_url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
+
+        self.page.lock().unwrap().url = url.to_string();
+        self.omnibox_buffer = url.to_string();
+
+        let webview = WebViewBuilder::new(&servo, offscreen_rc)
+            .url(url)
+            .hidpi_scale_factor(Scale::new(window.scale_factor() as f32))
+            .delegate(delegate)
+            .build();
+
+        // egui context using Servo's GL.
+        let gl = rendering_context.glow_gl_api();
+        let egui = EguiGlow::new(event_loop, gl, None, None, true);
+        egui.egui_ctx.set_visuals(egui::Visuals::dark());
+
+        window.set_visible(true);
+        info!(
+            "Created window {}x{} with Servo",
+            window.inner_size().width,
+            window.inner_size().height
+        );
+
+        self.window = Some(window);
+        self.rendering_context = Some(rendering_context);
+        self.servo = Some(servo);
+        self.webview = Some(webview);
+        self.offscreen = Some(offscreen);
+        self.egui = Some(egui);
+
+        if self.app.tabs.is_empty() {
+            self.app
+                .open_tab("craft://welcome", ContainerId::default_container());
         }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let Some(gl_window) = self.gl_window.as_mut() else {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let Some(rendering_context) = self.rendering_context.clone() else {
             return;
         };
         let Some(egui) = self.egui.as_mut() else {
             return;
         };
 
-        let response = egui.on_window_event(&gl_window.window, &event);
+        let response = egui.on_window_event(&window, &event);
 
         match event {
             WindowEvent::CloseRequested => {
@@ -207,8 +267,20 @@ impl ApplicationHandler for BrowserWindowApp {
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
-                gl_window.resize(new_size);
-                gl_window.window.request_redraw();
+                rendering_context.resize(new_size);
+                if let Some(offscreen) = self.offscreen.as_ref() {
+                    offscreen.resize(new_size);
+                }
+                if let Some(webview) = self.webview.as_ref() {
+                    webview.resize(new_size);
+                }
+                window.request_redraw();
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(webview) = self.webview.as_ref() {
+                    webview.set_hidpi_scale_factor(Scale::new(scale_factor as f32));
+                }
+                window.request_redraw();
             }
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
@@ -219,244 +291,258 @@ impl ApplicationHandler for BrowserWindowApp {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let _ = self.app.poll_engine_events();
-
-                if let Some(title) = self.app.media_window_title() {
-                    gl_window.window.set_title(&title);
+                // Pump Servo.
+                if let Some(servo) = self.servo.as_ref() {
+                    servo.spin_event_loop();
                 }
 
+                let _ = self.app.poll_engine_events();
+
+                // Make GL context current.
+                rendering_context.make_current().expect("make_current");
+
+                // Render the webview into its offscreen context.
+                if let Some(webview) = self.webview.as_ref() {
+                    webview.paint();
+                }
+
+                // Clear the window framebuffer.
+                unsafe {
+                    use glow::HasContext as _;
+                    let gl = rendering_context.glow_gl_api();
+                    gl.clear_color(0.1, 0.1, 0.12, 1.0);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                }
+
+                // Blit the offscreen webview into the window before egui paints.
+                if let Some(offscreen) = self.offscreen.as_ref()
+                    && let Some(blit) = offscreen.render_to_parent_callback()
+                {
+                    let size = rendering_context.size();
+                    let gl = rendering_context.glow_gl_api();
+                    let rect = euclid::default::Rect::new(
+                        euclid::default::Point2D::new(0, 0),
+                        euclid::default::Size2D::new(size.width as i32, size.height as i32),
+                    );
+                    blit(&gl, rect);
+                }
+
+                // Run egui UI over the blitted page.
                 let app = &mut self.app;
-
-                // Sync tab manager from app tabs.
-                app.tab_manager
-                    .sync_from_tabs(&app.tabs, app.active_tab_id.as_ref());
-
-                let media_count = app.media_hub.len();
-                let tabs: Vec<(craft_core::tab::TabId, String, bool)> = app
-                    .tab_manager
-                    .get_render_tree()
-                    .iter()
-                    .map(|v| (v.tab_id.clone(), v.title.clone(), v.is_active))
-                    .collect();
-                let active_url = app
-                    .active_tab_id
-                    .as_ref()
-                    .and_then(|id| app.tabs.iter().find(|t| &t.id == id))
-                    .map(|t| t.url.clone())
-                    .unwrap_or_default();
-
-                egui.run(&gl_window.window, |ui| {
-                    // --- Top toolbar: omnibox + media ---
-                    egui::Panel::top("toolbar").show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("CraftBrowsing");
-                            ui.separator();
-
-                            // Container selector
-                            let current_container = app
-                                .active_tab_id
-                                .as_ref()
-                                .and_then(|id| app.tabs.iter().find(|t| &t.id == id))
-                                .map(|t| t.container_id.clone())
-                                .unwrap_or_else(
-                                    craft_core::container::ContainerId::default_container,
-                                );
-                            ui.label(format!("[{}]", current_container.0));
-                            ui.separator();
-
-                            // Omnibox
-                            let mut url_text = if app.omnibox.is_focused {
-                                app.omnibox.input_text.clone()
-                            } else {
-                                active_url.clone()
+                let webview_nav = self.webview.clone();
+                let page = self.page.clone();
+                let buffer = &mut self.omnibox_buffer;
+                if let Some(egui) = self.egui.as_mut() {
+                    let window_ref = window.clone();
+                    egui.run(&window_ref, |ui| {
+                        // --- Top toolbar: nav buttons + omnibox + media count ---
+                        egui::Panel::top("toolbar").show_inside(ui, |ui| {
+                            let (loading, can_back, can_fwd) = {
+                                let p = page.lock().unwrap();
+                                (p.loading, p.can_go_back, p.can_go_forward)
                             };
-                            let response = ui.add(
-                                egui::TextEdit::singleline(&mut url_text)
-                                    .desired_width(ui.available_width() - 120.0)
-                                    .hint_text("Search or enter URL"),
-                            );
-                            if response.gained_focus() {
-                                app.omnibox.is_focused = true;
-                                app.omnibox.input_text = active_url.clone();
-                            }
-                            if response.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                            {
-                                let input = if app.omnibox.is_focused {
-                                    app.omnibox.input_text.clone()
-                                } else {
-                                    url_text.clone()
-                                };
-                                app.submit_omnibox(&input);
-                                app.omnibox.is_focused = false;
-                            }
-                            // Update omnibox text while typing
-                            if response.changed() {
-                                app.omnibox.input_text = url_text.clone();
-                            }
+                            ui.horizontal(|ui| {
+                                if let Some(wv) = &webview_nav {
+                                    if ui.add_enabled(can_back, egui::Button::new("←")).clicked()
+                                    {
+                                        let _ = wv.go_back(1);
+                                    }
+                                    if ui.add_enabled(can_fwd, egui::Button::new("→")).clicked() {
+                                        let _ = wv.go_forward(1);
+                                    }
+                                    if ui.button("⟳").clicked() {
+                                        wv.reload();
+                                    }
+                                }
+                                if loading {
+                                    ui.label("(loading…)");
+                                }
 
-                            ui.separator();
-                            // Media indicator
-                            ui.label(format!("Media: {}", media_count));
-                            if ui.button("\u{25B6}/\u{23F8}").clicked() {
-                                app.dispatch_media_action(None, MediaAction::TogglePlayPause);
-                            }
+                                ui.separator();
+                                let resp = ui.add(
+                                    egui::TextEdit::singleline(buffer)
+                                        .desired_width(ui.available_width() - 60.0)
+                                        .hint_text("Search or enter URL"),
+                                );
+                                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    && resp.has_focus();
+                                if enter {
+                                    let target = match OmniboxState::resolve_input(buffer) {
+                                        OmniboxTarget::Url(u)
+                                        | OmniboxTarget::Internal(u)
+                                        | OmniboxTarget::Search {
+                                            resolved_url: u, ..
+                                        } => u,
+                                    };
+                                    *buffer = target.clone();
+                                    if let Some(wv) = &webview_nav
+                                        && let Ok(parsed) = Url::parse(&target)
+                                    {
+                                        wv.load(parsed);
+                                    }
+                                    resp.surrender_focus();
+                                }
+
+                                ui.separator();
+                                let media_count = app.media_hub.len();
+                                ui.label(format!("Media: {}", media_count));
+                                if ui.button("⏯").clicked() {
+                                    app.dispatch_media_action(None, MediaAction::TogglePlayPause);
+                                }
+                            });
                         });
-                    });
 
-                    // --- Tab strip (left side panel) ---
-                    egui::Panel::left("tabs")
-                        .default_size(200.0)
-                        .show(ui, |ui| {
+                        // --- Left tab sidebar ---
+                        egui::Panel::left("tabs").show_inside(ui, |ui| {
                             ui.heading("Tabs");
                             ui.separator();
-                            for (tab_id, title, is_active) in &tabs {
-                                let label = if *is_active {
-                                    format!("> {}", title)
+                            app.tab_manager
+                                .sync_from_tabs(&app.tabs, app.active_tab_id.as_ref());
+                            let tree = app.tab_manager.get_render_tree();
+                            for item in tree {
+                                let label = if item.is_active {
+                                    format!("▸ {}", item.title)
                                 } else {
-                                    title.clone()
+                                    format!("  {}", item.title)
                                 };
-                                if ui.selectable_label(*is_active, &label).clicked() {
-                                    app.select_tab(tab_id);
+                                if ui.selectable_label(item.is_active, label).clicked() {
+                                    app.select_tab(&item.tab_id);
                                 }
                             }
                             ui.separator();
                             if ui.button("+ New Tab").clicked() {
-                                app.open_tab(
-                                    "craft://welcome",
-                                    craft_core::container::ContainerId::default_container(),
-                                );
+                                app.open_tab("craft://welcome", ContainerId::default_container());
                             }
                         });
 
-                    // --- Media hub (right side panel) ---
-                    egui::Panel::right("media_hub")
-                        .default_size(260.0)
-                        .show(ui, |ui| {
-                            ui.heading("Media Sessions");
-                            ui.separator();
-                            if app.media_hub.is_empty() {
-                                ui.label("No active media.");
-                            } else {
-                                for session in app.media_hub.sessions.clone() {
-                                    ui.group(|ui| {
-                                        ui.label(session.display_title());
-                                        ui.label(format!(
-                                            "{} \u{2022} {}",
-                                            session.origin, session.container_id.0
-                                        ));
-                                        ui.label(format!(
-                                            "{:?} \u{2022} {}",
-                                            session.state,
-                                            if session.is_live() {
-                                                "LIVE".to_string()
-                                            } else {
-                                                format!(
-                                                    "{} / {}",
-                                                    format_ms(session.position_ms),
-                                                    session
-                                                        .duration_ms
-                                                        .map(format_ms)
-                                                        .unwrap_or_else(|| "?".to_string())
+                        // --- Right media hub ---
+                        egui::Panel::right("media_hub")
+                            .default_size(260.0)
+                            .show_inside(ui, |ui| {
+                                ui.heading("Media Sessions");
+                                ui.separator();
+                                if app.media_hub.is_empty() {
+                                    ui.label("No active media.");
+                                } else {
+                                    for session in app.media_hub.sessions.clone() {
+                                        ui.group(|ui| {
+                                            ui.label(session.display_title());
+                                            ui.label(format!(
+                                                "{} • {}",
+                                                session.origin, session.container_id.0
+                                            ));
+                                            ui.label(format!(
+                                                "{:?} • {}",
+                                                session.state,
+                                                if session.is_live() {
+                                                    "LIVE".to_string()
+                                                } else {
+                                                    format!(
+                                                        "{} / {}",
+                                                        format_ms(session.position_ms),
+                                                        session
+                                                            .duration_ms
+                                                            .map(format_ms)
+                                                            .unwrap_or_else(|| "?".to_string())
+                                                    )
+                                                }
+                                            ));
+                                            ui.horizontal(|ui| {
+                                                if ui.button("⏪").clicked() {
+                                                    app.dispatch_media_action(
+                                                        Some(session.id.clone()),
+                                                        MediaAction::SkipBackward(10_000),
+                                                    );
+                                                }
+                                                let glyph = if session.is_playing() {
+                                                    "⏸"
+                                                } else {
+                                                    "▶"
+                                                };
+                                                if ui.button(glyph).clicked() {
+                                                    app.dispatch_media_action(
+                                                        Some(session.id.clone()),
+                                                        MediaAction::TogglePlayPause,
+                                                    );
+                                                }
+                                                if ui.button("⏩").clicked() {
+                                                    app.dispatch_media_action(
+                                                        Some(session.id.clone()),
+                                                        MediaAction::SkipForward(10_000),
+                                                    );
+                                                }
+                                                let mute =
+                                                    if session.muted { "🔇" } else { "🔊" };
+                                                if ui.button(mute).clicked() {
+                                                    app.dispatch_media_action(
+                                                        Some(session.id.clone()),
+                                                        MediaAction::ToggleMute,
+                                                    );
+                                                }
+                                            });
+                                            let mut vol = session.volume * 100.0;
+                                            if ui
+                                                .add(
+                                                    egui::Slider::new(&mut vol, 0.0..=100.0)
+                                                        .text("Vol"),
                                                 )
-                                            }
-                                        ));
-                                        ui.horizontal(|ui| {
-                                            if ui.button("\u{25C0}\u{25C0}").clicked() {
-                                                app.dispatch_media_action(
-                                                    Some(session.id.clone()),
-                                                    MediaAction::SkipBackward(10_000),
-                                                );
-                                            }
-                                            if ui
-                                                .button(if session.is_playing() {
-                                                    "\u{23F8}"
-                                                } else {
-                                                    "\u{25B6}"
-                                                })
-                                                .clicked()
+                                                .changed()
                                             {
                                                 app.dispatch_media_action(
                                                     Some(session.id.clone()),
-                                                    MediaAction::TogglePlayPause,
-                                                );
-                                            }
-                                            if ui.button("\u{25B6}\u{25B6}").clicked() {
-                                                app.dispatch_media_action(
-                                                    Some(session.id.clone()),
-                                                    MediaAction::SkipForward(10_000),
-                                                );
-                                            }
-                                            if ui
-                                                .button(if session.muted {
-                                                    "\u{1F507}"
-                                                } else {
-                                                    "\u{1F50A}"
-                                                })
-                                                .clicked()
-                                            {
-                                                app.dispatch_media_action(
-                                                    Some(session.id.clone()),
-                                                    MediaAction::ToggleMute,
+                                                    MediaAction::SetVolume(vol / 100.0),
                                                 );
                                             }
                                         });
-                                        let mut vol = session.volume * 100.0;
-                                        if ui
-                                            .add(
-                                                egui::Slider::new(&mut vol, 0.0..=100.0)
-                                                    .text("Vol"),
-                                            )
-                                            .changed()
-                                        {
-                                            app.dispatch_media_action(
-                                                Some(session.id.clone()),
-                                                MediaAction::SetVolume(vol / 100.0),
-                                            );
-                                        }
-                                    });
+                                    }
                                 }
-                            }
-                        });
+                            });
 
-                    // --- Central viewport ---
-                    egui::CentralPanel::default().show(ui, |ui| {
-                        ui.label("Browser viewport");
-                        ui.label("Servo rendering pending engine integration.");
-                        ui.separator();
-                        if let Some(active_id) = &app.active_tab_id {
-                            if let Some(tab) = app.tabs.iter().find(|t| &t.id == active_id) {
-                                ui.label(format!("Active tab: {}", tab.title));
-                                ui.label(format!("URL: {}", tab.url));
-                                ui.label(format!("Container: {}", tab.container_id.0));
-                                ui.label(format!("State: {:?}", tab.state));
-                            }
-                        } else {
-                            ui.label("No active tab. Press Ctrl+T to open one.");
-                        }
+                        // --- Central viewport: transparent so the page shows ---
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::new().fill(egui::Color32::TRANSPARENT))
+                            .show_inside(ui, |_ui| {});
                     });
-                });
 
-                unsafe {
-                    use glow::HasContext as _;
-                    gl_window.gl.clear_color(0.1, 0.1, 0.12, 1.0);
-                    gl_window.gl.clear(glow::COLOR_BUFFER_BIT);
+                    egui.paint(&window_ref);
                 }
 
-                egui.paint(&gl_window.window);
-                gl_window.swap_buffers();
+                // Reflect page title in the window title.
+                {
+                    let p = self.page.lock().unwrap();
+                    let title = if p.title.is_empty() {
+                        format!("CraftBrowsing - {}", p.url)
+                    } else {
+                        format!("CraftBrowsing - {}", p.title)
+                    };
+                    window.set_title(&title);
+                }
 
-                if egui.egui_ctx.has_requested_repaint() {
-                    gl_window.window.request_redraw();
+                rendering_context.present();
+
+                if self.new_frame.swap(false, Ordering::AcqRel) {
+                    window.request_redraw();
                 }
             }
             _ => {}
         }
     }
 
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: WakerEvent) {
+        if let Some(servo) = self.servo.as_ref() {
+            servo.spin_event_loop();
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(gl_window) = self.gl_window.as_ref() {
-            gl_window.window.request_redraw();
+        if let Some(servo) = self.servo.as_ref() {
+            servo.spin_event_loop();
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
         }
     }
 }
@@ -483,13 +569,9 @@ impl BrowserWindowApp {
             Key::Character(c) if c.to_ascii_lowercase() == "r" => {
                 if let Some(active_id) = self.app.active_tab_id.as_ref() {
                     info!("Shortcut: Reload Tab {:?}", active_id);
-                    let _ = self
-                        .app
-                        .cmd_sender
-                        .send(craft_engine::EngineCommand::Reload {
-                            tab_id: active_id.clone(),
-                            bypass_cache: false,
-                        });
+                    if let Some(webview) = self.webview.as_ref() {
+                        webview.reload();
+                    }
                 }
             }
             Key::Named(NamedKey::Escape) => {
@@ -498,47 +580,6 @@ impl BrowserWindowApp {
                         tab_id: active_id.clone(),
                     });
                 }
-            }
-            Key::Named(NamedKey::Space)
-                if (self.modifiers.control_key() || self.modifiers.super_key())
-                    && self.modifiers.shift_key() =>
-            {
-                info!("Shortcut: Media Toggle Play/Pause");
-                self.app
-                    .dispatch_media_action(None, MediaAction::TogglePlayPause);
-            }
-            Key::Named(NamedKey::ArrowRight)
-                if (self.modifiers.control_key() || self.modifiers.super_key())
-                    && self.modifiers.shift_key() =>
-            {
-                info!("Shortcut: Media Skip Forward");
-                self.app
-                    .dispatch_media_action(None, MediaAction::SkipForward(10_000));
-            }
-            Key::Named(NamedKey::ArrowLeft)
-                if (self.modifiers.control_key() || self.modifiers.super_key())
-                    && self.modifiers.shift_key() =>
-            {
-                info!("Shortcut: Media Skip Backward");
-                self.app
-                    .dispatch_media_action(None, MediaAction::SkipBackward(10_000));
-            }
-            Key::Character(c)
-                if (self.modifiers.control_key() || self.modifiers.super_key())
-                    && self.modifiers.shift_key()
-                    && c.to_ascii_lowercase() == "m" =>
-            {
-                info!("Shortcut: Media Toggle Mute");
-                self.app
-                    .dispatch_media_action(None, MediaAction::ToggleMute);
-            }
-            Key::Character(c)
-                if (self.modifiers.control_key() || self.modifiers.super_key())
-                    && self.modifiers.shift_key()
-                    && c.to_ascii_lowercase() == "p" =>
-            {
-                info!("Shortcut: Media Enter PiP");
-                self.app.dispatch_media_action(None, MediaAction::EnterPip);
             }
             _ => {}
         }
@@ -549,5 +590,5 @@ fn format_ms(ms: u64) -> String {
     let total_secs = ms / 1000;
     let mins = total_secs / 60;
     let secs = total_secs % 60;
-    format!("{}:{:02}", mins, secs)
+    format!("{:02}:{:02}", mins, secs)
 }

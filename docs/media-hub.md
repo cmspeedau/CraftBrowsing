@@ -2,6 +2,23 @@
 
 CraftBrowsing provides a unified media controller accessible from the browser toolbar, enabling users to monitor, scrub, and control all audio and video playback across tabs and containers, along with an advanced Picture-in-Picture (PiP) window.
 
+## Implementation status
+
+Foundation implemented (data model + shortcuts), visual chrome and OS media keys pending:
+
+- `craft-core::media`: `MediaSession`, `MediaHub`, `MediaSessionEvent`, `MediaAction` with tests.
+- `BrowserApp` holds a `MediaHub` and `dispatch_media_action` / `ingest_media_event` / `media_window_title`.
+- Global shortcuts: Ctrl/Cmd+Shift+Space (toggle play/pause), ArrowRight/ArrowLeft (skip +/-10s), M (mute), P (enter PiP). Active session is reflected in the window title.
+- Window title updates to show the active playing session.
+
+Not yet implemented (requires a rendered chrome layer and engine wiring):
+
+- Toolbar media popup UI with seek bar, volume scrubber, container badge.
+- Floating always-on-top PiP window with scrubber, speed toggle, subtitles.
+- OS media keys (MPRIS, SMTC, Now Playing).
+- Audio output device routing per container.
+- Servo media session event wiring (`notify_media_session_event`).
+
 ---
 
 ## 1. Global Media Hub Toolbar Popup

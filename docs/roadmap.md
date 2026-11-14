@@ -10,7 +10,7 @@ CraftBrowsing is a next-generation, highly customizable web browser built on Ser
 
 ### v0.1.0 — Phase 1: Core Foundation, Tabs & Essential Shell
 - [x] Workspace architecture setup with latest stable Rust.
-- [x] Embed Servo runtime with WebRender surface compositor in `craft-engine`.
+- [x] Embed Servo runtime with WebRender surface compositor in `craft-engine`. (Now a real `servo` 0.8.0 embed: a single `WebView` renders through WebRender into an offscreen context that the egui chrome composites; omnibox, back/forward/reload, HiDPI, resize, and URL/title callbacks are wired. Driven from `craft-ui::window`. `craft-engine`'s simulated command bridge is superseded. Containers and multiprocess content processes are still pending; see `docs/architecture.md` and the `servo-engine-integration` skill.)
 - [x] Implement declarative browser chrome with horizontal and vertical tabs layout engine in `craft-app` (`docs/tabs-and-groups.md`).
 - [x] Tab Grouping, color-coded clusters, and direct Multi-Account Container binding.
 - [x] Session restore engine and memory hibernation / tab discarding for inactive tabs.

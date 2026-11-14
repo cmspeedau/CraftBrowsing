@@ -21,7 +21,15 @@ impl AdblockManager {
             site_exceptions: RwLock::new(Vec::new()),
         }
     }
+}
 
+impl Default for AdblockManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AdblockManager {
     pub fn is_enabled(&self) -> bool {
         *self.enabled.read().unwrap()
     }

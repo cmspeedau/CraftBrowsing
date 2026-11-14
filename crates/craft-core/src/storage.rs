@@ -71,7 +71,7 @@ impl StorageEngine {
     ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO bookmarks (id, url, title, folder, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, url, title, folder, created_at],
+            params![id, url, title, folder, created_at as i64],
         )?;
         Ok(())
     }

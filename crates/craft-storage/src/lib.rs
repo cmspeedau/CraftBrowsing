@@ -551,7 +551,7 @@ impl PrivateSession {
     pub fn storage(&self) -> &Storage {
         &self.storage
     }
-    pub fn end(mut self) -> SqlResult<()> {
+    pub fn end(self) -> SqlResult<()> {
         self.storage.purge_all()?;
         Ok(())
     }
