@@ -61,6 +61,7 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 - [Web Developer Tools](docs/devtools.md)
 - [Plugin System & Extensions](docs/plugin-system.md)
 - [Passwords & External Manager Integration](docs/passwords.md)
+- [Web Compatibility Gaps (Servo engine)](docs/webcompat.md)
 
 ---
 
