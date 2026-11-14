@@ -101,6 +101,9 @@ pub struct BrowserWindowApp {
     new_frame: Arc<AtomicBool>,
     page: Arc<Mutex<PageState>>,
     omnibox_buffer: String,
+    home_url: String,
+    media_hub_open: bool,
+    menu_open: bool,
     modifiers: ModifiersState,
     initial_url: String,
     event_proxy: Option<winit::event_loop::EventLoopProxy<WakerEvent>>,
@@ -119,6 +122,9 @@ impl BrowserWindowApp {
             new_frame: Arc::new(AtomicBool::new(true)),
             page: Arc::new(Mutex::new(PageState::default())),
             omnibox_buffer: String::new(),
+            home_url: "https://example.com".to_string(),
+            media_hub_open: false,
+            menu_open: false,
             modifiers: ModifiersState::empty(),
             initial_url: "https://example.com".to_string(),
             event_proxy: None,
@@ -223,10 +229,10 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
             .delegate(delegate)
             .build();
 
-        // egui context using Servo's GL.
+        // egui context using Servo's GL, styled to the Firefox chrome palette.
         let gl = rendering_context.glow_gl_api();
         let egui = EguiGlow::new(event_loop, gl, None, None, true);
-        egui.egui_ctx.set_visuals(egui::Visuals::dark());
+        egui.egui_ctx.set_visuals(firefox_visuals());
 
         window.set_visible(true);
         info!(
@@ -332,176 +338,330 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                 let webview_nav = self.webview.clone();
                 let page = self.page.clone();
                 let buffer = &mut self.omnibox_buffer;
+                let webview_home = self.home_url.clone();
+                let media_open = &mut self.media_hub_open;
+                let menu_open = &mut self.menu_open;
                 if let Some(egui) = self.egui.as_mut() {
                     let window_ref = window.clone();
                     egui.run(&window_ref, |ui| {
-                        // --- Top toolbar: nav buttons + omnibox + media count ---
-                        egui::Panel::top("toolbar").show_inside(ui, |ui| {
-                            let (loading, can_back, can_fwd) = {
-                                let p = page.lock().unwrap();
-                                (p.loading, p.can_go_back, p.can_go_forward)
-                            };
-                            ui.horizontal(|ui| {
-                                if let Some(wv) = &webview_nav {
-                                    if ui.add_enabled(can_back, egui::Button::new("←")).clicked()
-                                    {
-                                        let _ = wv.go_back(1);
-                                    }
-                                    if ui.add_enabled(can_fwd, egui::Button::new("→")).clicked() {
-                                        let _ = wv.go_forward(1);
-                                    }
-                                    if ui.button("⟳").clicked() {
-                                        wv.reload();
-                                    }
-                                }
-                                if loading {
-                                    ui.label("(loading…)");
-                                }
-
-                                ui.separator();
-                                let resp = ui.add(
-                                    egui::TextEdit::singleline(buffer)
-                                        .desired_width(ui.available_width() - 60.0)
-                                        .hint_text("Search or enter URL"),
-                                );
-                                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                    && resp.has_focus();
-                                if enter {
-                                    let target = match OmniboxState::resolve_input(buffer) {
-                                        OmniboxTarget::Url(u)
-                                        | OmniboxTarget::Internal(u)
-                                        | OmniboxTarget::Search {
-                                            resolved_url: u, ..
-                                        } => u,
-                                    };
-                                    *buffer = target.clone();
-                                    if let Some(wv) = &webview_nav
-                                        && let Ok(parsed) = Url::parse(&target)
-                                    {
-                                        wv.load(parsed);
-                                    }
-                                    resp.surrender_focus();
-                                }
-
-                                ui.separator();
-                                let media_count = app.media_hub.len();
-                                ui.label(format!("Media: {}", media_count));
-                                if ui.button("⏯").clicked() {
-                                    app.dispatch_media_action(None, MediaAction::TogglePlayPause);
-                                }
-                            });
-                        });
-
-                        // --- Left tab sidebar ---
-                        egui::Panel::left("tabs").show_inside(ui, |ui| {
-                            ui.heading("Tabs");
-                            ui.separator();
-                            app.tab_manager
-                                .sync_from_tabs(&app.tabs, app.active_tab_id.as_ref());
-                            let tree = app.tab_manager.get_render_tree();
-                            for item in tree {
-                                let label = if item.is_active {
-                                    format!("▸ {}", item.title)
-                                } else {
-                                    format!("  {}", item.title)
-                                };
-                                if ui.selectable_label(item.is_active, label).clicked() {
-                                    app.select_tab(&item.tab_id);
-                                }
-                            }
-                            ui.separator();
-                            if ui.button("+ New Tab").clicked() {
-                                app.open_tab("craft://welcome", ContainerId::default_container());
-                            }
-                        });
-
-                        // --- Right media hub ---
-                        egui::Panel::right("media_hub")
-                            .default_size(260.0)
+                        // ---- Row 1: tab strip (rounded tabs, container accents) ----
+                        egui::Panel::top("tabstrip")
+                            .frame(
+                                egui::Frame::new()
+                                    .fill(hex("#f0f0f4"))
+                                    .inner_margin(egui::Margin {
+                                        top: 6,
+                                        left: 8,
+                                        right: 8,
+                                        bottom: 0,
+                                    })
+                                    .stroke(egui::Stroke::NONE),
+                            )
                             .show_inside(ui, |ui| {
-                                ui.heading("Media Sessions");
-                                ui.separator();
-                                if app.media_hub.is_empty() {
-                                    ui.label("No active media.");
-                                } else {
-                                    for session in app.media_hub.sessions.clone() {
-                                        ui.group(|ui| {
-                                            ui.label(session.display_title());
-                                            ui.label(format!(
-                                                "{} • {}",
-                                                session.origin, session.container_id.0
-                                            ));
-                                            ui.label(format!(
-                                                "{:?} • {}",
-                                                session.state,
-                                                if session.is_live() {
-                                                    "LIVE".to_string()
-                                                } else {
-                                                    format!(
-                                                        "{} / {}",
-                                                        format_ms(session.position_ms),
-                                                        session
-                                                            .duration_ms
-                                                            .map(format_ms)
-                                                            .unwrap_or_else(|| "?".to_string())
+                                app.tab_manager
+                                    .sync_from_tabs(&app.tabs, app.active_tab_id.as_ref());
+                                let tree = app.tab_manager.get_render_tree();
+                                let mut select_id: Option<craft_core::tab::TabId> = None;
+                                let mut close_id: Option<craft_core::tab::TabId> = None;
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                    for item in &tree {
+                                        let (_name, color_hex, icon) =
+                                            app.container_identity(&item.container_id);
+                                        let is_default = item.container_id.0
+                                            == craft_core::container::ContainerId::DEFAULT;
+                                        let label = if item.title.is_empty() {
+                                            item.url.clone()
+                                        } else {
+                                            item.title.clone()
+                                        };
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 4.0;
+                                            if !is_default {
+                                                // Real container accent, from Container.color_hex.
+                                                ui.label(
+                                                    egui::RichText::new("▌")
+                                                        .color(hex(&color_hex))
+                                                        .size(16.0),
+                                                );
+                                                ui.label(egui::RichText::new(icon).size(12.0));
+                                            }
+                                            let tab = ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new(&label).size(13.0),
                                                     )
-                                                }
-                                            ));
-                                            ui.horizontal(|ui| {
-                                                if ui.button("⏪").clicked() {
-                                                    app.dispatch_media_action(
-                                                        Some(session.id.clone()),
-                                                        MediaAction::SkipBackward(10_000),
-                                                    );
-                                                }
-                                                let glyph = if session.is_playing() {
-                                                    "⏸"
-                                                } else {
-                                                    "▶"
-                                                };
-                                                if ui.button(glyph).clicked() {
-                                                    app.dispatch_media_action(
-                                                        Some(session.id.clone()),
-                                                        MediaAction::TogglePlayPause,
-                                                    );
-                                                }
-                                                if ui.button("⏩").clicked() {
-                                                    app.dispatch_media_action(
-                                                        Some(session.id.clone()),
-                                                        MediaAction::SkipForward(10_000),
-                                                    );
-                                                }
-                                                let mute =
-                                                    if session.muted { "🔇" } else { "🔊" };
-                                                if ui.button(mute).clicked() {
-                                                    app.dispatch_media_action(
-                                                        Some(session.id.clone()),
-                                                        MediaAction::ToggleMute,
-                                                    );
-                                                }
-                                            });
-                                            let mut vol = session.volume * 100.0;
+                                                    .fill(if item.is_active {
+                                                        egui::Color32::WHITE
+                                                    } else {
+                                                        egui::Color32::TRANSPARENT
+                                                    })
+                                                    .stroke(egui::Stroke::NONE)
+                                                    .corner_radius(egui::CornerRadius {
+                                                        nw: 8,
+                                                        ne: 8,
+                                                        sw: 0,
+                                                        se: 0,
+                                                    })
+                                                    .min_size(egui::vec2(150.0, 30.0)),
+                                                )
+                                                .on_hover_text(&label);
+                                            if tab.clicked() {
+                                                select_id = Some(item.tab_id.clone());
+                                            }
                                             if ui
                                                 .add(
-                                                    egui::Slider::new(&mut vol, 0.0..=100.0)
-                                                        .text("Vol"),
+                                                    egui::Button::new(
+                                                        egui::RichText::new("×").size(14.0),
+                                                    )
+                                                    .fill(egui::Color32::TRANSPARENT)
+                                                    .stroke(egui::Stroke::NONE),
                                                 )
-                                                .changed()
+                                                .on_hover_text("Close tab")
+                                                .clicked()
                                             {
-                                                app.dispatch_media_action(
-                                                    Some(session.id.clone()),
-                                                    MediaAction::SetVolume(vol / 100.0),
-                                                );
+                                                close_id = Some(item.tab_id.clone());
                                             }
                                         });
                                     }
+                                    if ui
+                                        .add(
+                                            egui::Button::new("+")
+                                                .fill(egui::Color32::TRANSPARENT)
+                                                .stroke(egui::Stroke::NONE),
+                                        )
+                                        .on_hover_text("New tab in default container")
+                                        .clicked()
+                                    {
+                                        app.open_tab("about:blank", ContainerId::default_container());
+                                    }
+                                });
+                                if let Some(id) = select_id {
+                                    app.select_tab(&id);
+                                }
+                                if let Some(id) = close_id {
+                                    app.close_tab(&id);
                                 }
                             });
 
-                        // --- Central viewport: transparent so the page shows ---
+                        // ---- Row 2: navigation toolbar ----
+                        egui::Panel::top("toolbar")
+                            .frame(
+                                egui::Frame::new()
+                                    .fill(egui::Color32::WHITE)
+                                    .inner_margin(egui::Margin::symmetric(8, 5))
+                                    .stroke(egui::Stroke::NONE),
+                            )
+                            .show_inside(ui, |ui| {
+                                let (loading, can_back, can_fwd) = {
+                                    let p = page.lock().unwrap();
+                                    (p.loading, p.can_go_back, p.can_go_forward)
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    if let Some(wv) = &webview_nav {
+                                        if ui
+                                            .add_enabled(can_back, icon_button("←"))
+                                            .on_hover_text("Back")
+                                            .clicked()
+                                        {
+                                            let _ = wv.go_back(1);
+                                        }
+                                        if ui
+                                            .add_enabled(can_fwd, icon_button("→"))
+                                            .on_hover_text("Forward")
+                                            .clicked()
+                                        {
+                                            let _ = wv.go_forward(1);
+                                        }
+                                        if ui
+                                            .add(if loading { icon_button("✕") } else { icon_button("⟳") })
+                                            .on_hover_text(if loading { "Stop" } else { "Reload" })
+                                            .clicked()
+                                        {
+                                            if loading {
+                                                wv.evaluate_javascript("window.stop()", |_| {});
+                                            } else {
+                                                wv.reload();
+                                            }
+                                        }
+                                        if ui
+                                            .add(icon_button("⌂"))
+                                            .on_hover_text("Home")
+                                            .clicked()
+                                            && let Ok(home) = Url::parse(&webview_home.clone())
+                                        {
+                                            wv.load(home);
+                                        }
+                                    }
+
+                                    ui.add_space(4.0);
+                                    // URL bar (pill) with a tracking-protection shield.
+                                    let protected_now = app.adblock_enabled();
+                                    let shield = if protected_now { "🛡" } else { "⚠" };
+                                    egui::Frame::new()
+                                        .fill(hex("#f0f0f4"))
+                                        .corner_radius(egui::CornerRadius::same(17))
+                                        .inner_margin(egui::Margin::symmetric(10, 6))
+                                        .show(ui, |ui| {
+                                            ui.horizontal(|ui| {
+                                                if ui
+                                                    .label(
+                                                        egui::RichText::new(shield).size(15.0),
+                                                    )
+                                                    .on_hover_text(if protected_now {
+                                                        "Tracking protection ON (click to pause)"
+                                                    } else {
+                                                        "Tracking protection PAUSED (click to enable)"
+                                                    })
+                                                    .clicked()
+                                                {
+                                                    app.set_adblock_enabled(!protected_now);
+                                                }
+                                                let resp = ui.add(
+                                                    egui::TextEdit::singleline(buffer)
+                                                        .desired_width(
+                                                            ui.available_width().max(120.0),
+                                                        )
+                                                        .hint_text("Search or enter address"),
+                                                );
+                                                let enter = ui
+                                                    .input(|i| i.key_pressed(egui::Key::Enter))
+                                                    && resp.has_focus();
+                                                if enter {
+                                                    let target = match OmniboxState::resolve_input(
+                                                        buffer,
+                                                    ) {
+                                                        OmniboxTarget::Url(u)
+                                                        | OmniboxTarget::Internal(u)
+                                                        | OmniboxTarget::Search {
+                                                            resolved_url: u, ..
+                                                        } => u,
+                                                    };
+                                                    *buffer = target.clone();
+                                                    if let Some(wv) = &webview_nav
+                                                        && let Ok(parsed) = Url::parse(&target)
+                                                    {
+                                                        wv.load(parsed);
+                                                    }
+                                                    resp.surrender_focus();
+                                                }
+                                            });
+                                        });
+
+                                    // Right-aligned: media hub toggle + container menu.
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .add(icon_button("☰"))
+                                                .on_hover_text("Menu")
+                                                .clicked()
+                                            {
+                                                *menu_open = true;
+                                            }
+                                            if ui
+                                                .add(icon_button(if *media_open {
+                                                    "◉"
+                                                } else {
+                                                    "◎"
+                                                }))
+                                                .on_hover_text("Toggle Media Hub")
+                                                .clicked()
+                                            {
+                                                *media_open = !*media_open;
+                                            }
+                                            let mc = app.media_hub.len();
+                                            if mc > 0 {
+                                                ui.label(egui::RichText::new(mc.to_string()).weak());
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+
+                        // ---- Media hub as right panel, only when open ----
+                        if *media_open {
+                            egui::Panel::right("media_hub")
+                                .default_size(300.0)
+                                .frame(
+                                    egui::Frame::new()
+                                        .fill(hex("#f0f0f4"))
+                                        .inner_margin(egui::Margin::same(12)),
+                                )
+                                .show_inside(ui, |ui| {
+                                    ui.heading("Media Sessions");
+                                    ui.separator();
+                                    if app.media_hub.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new("No media is playing.")
+                                                .weak(),
+                                        );
+                                    } else {
+                                        render_media_sessions(ui, app);
+                                    }
+                                });
+                        }
+
+                        // ---- Central viewport: transparent so the page shows through ----
                         egui::CentralPanel::default()
                             .frame(egui::Frame::new().fill(egui::Color32::TRANSPARENT))
                             .show_inside(ui, |_ui| {});
+
+                        // ---- Overflow menu (real actions, incl. container-scoped new tabs) ----
+                        if *menu_open {
+                            egui::Window::new("Menu")
+                                .collapsible(false)
+                                .resizable(false)
+                                .anchor(egui::Align2::RIGHT_TOP, [-12.0, 56.0])
+                                .show(ui.ctx(), |ui| {
+                                    if ui.button("New Tab").clicked() {
+                                        app.open_tab("about:blank", ContainerId::default_container());
+                                        *menu_open = false;
+                                    }
+                                    if ui
+                                        .button(if *media_open {
+                                            "Hide Media Hub"
+                                        } else {
+                                            "Show Media Hub"
+                                        })
+                                        .clicked()
+                                    {
+                                        *media_open = !*media_open;
+                                        *menu_open = false;
+                                    }
+                                    ui.separator();
+                                    ui.label(egui::RichText::new("New Container Tab").weak());
+                                    for c in app.containers.clone() {
+                                        let icon = c.icon.clone();
+                                        let name = c.name.clone();
+                                        let row = ui.horizontal(|ui| {
+                                            ui.label(icon);
+                                            ui.button(name).clicked()
+                                        });
+                                        if row.inner {
+                                            app.open_tab("about:blank", c.id.clone());
+                                            *menu_open = false;
+                                        }
+                                    }
+                                    ui.separator();
+                                    if ui
+                                        .button(if app.adblock_enabled() {
+                                            "Pause Protection"
+                                        } else {
+                                            "Enable Protection"
+                                        })
+                                        .clicked()
+                                    {
+                                        let on = !app.adblock_enabled();
+                                        app.set_adblock_enabled(on);
+                                        *menu_open = false;
+                                    }
+                                    if ui.button("Close").clicked() {
+                                        *menu_open = false;
+                                    }
+                                });
+                        }
                     });
 
                     egui.paint(&window_ref);
@@ -591,4 +751,131 @@ fn format_ms(ms: u64) -> String {
     let mins = total_secs / 60;
     let secs = total_secs % 60;
     format!("{:02}:{:02}", mins, secs)
+}
+
+/// Parse a `#rrggbb` string into an egui color.
+fn hex(s: &str) -> egui::Color32 {
+    let h = s.trim_start_matches('#');
+    let r = u8::from_str_radix(&h[0..2], 16).unwrap_or(0);
+    let g = u8::from_str_radix(&h[2..4], 16).unwrap_or(0);
+    let b = u8::from_str_radix(&h[4..6], 16).unwrap_or(0);
+    egui::Color32::from_rgb(r, g, b)
+}
+
+/// A circular icon button sized like Firefox's toolbar buttons (32px, hit target
+/// above 24px so it is comfortable to click).
+fn icon_button(glyph: &str) -> egui::Button<'_> {
+    egui::Button::new(egui::RichText::new(glyph).size(15.0))
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::NONE)
+        .corner_radius(egui::CornerRadius::same(16))
+        .min_size(egui::vec2(32.0, 32.0))
+}
+
+/// Firefox Photon light-theme palette. Ink (#1c1b22) on the chrome grey (#f0f0f4)
+/// and on white both clear WCAG AA; the single accent (#0060df) is used only for
+/// selection, links, and focus, matching the reference.
+fn firefox_visuals() -> egui::Visuals {
+    let mut v = egui::Visuals::light();
+    let chrome = hex("#f0f0f4");
+    let ink = hex("#1c1b22");
+    let line = hex("#d7d7db");
+    let accent = hex("#0060df");
+
+    v.panel_fill = chrome;
+    v.window_fill = egui::Color32::WHITE;
+    v.extreme_bg_color = egui::Color32::WHITE;
+    v.faint_bg_color = hex("#e0e0e6");
+    v.hyperlink_color = accent;
+    v.override_text_color = Some(ink);
+
+    v.widgets.noninteractive.bg_fill = chrome;
+    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0_f32, ink);
+    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, line);
+    v.widgets.inactive.weak_bg_fill = chrome;
+    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, ink);
+    v.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+    v.widgets.hovered.weak_bg_fill = hex("#e0e0e6");
+    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, ink);
+    v.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    v.widgets.active.weak_bg_fill = accent;
+    v.widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
+    v.widgets.active.corner_radius = egui::CornerRadius::same(6);
+
+    v.selection.bg_fill = accent;
+    v.selection.stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
+
+    v
+}
+
+/// Media session cards shared between the always-open and panel layouts.
+fn render_media_sessions(ui: &mut egui::Ui, app: &mut BrowserApp) {
+    for session in app.media_hub.sessions.clone() {
+        ui.group(|ui| {
+            ui.label(
+                egui::RichText::new(session.display_title())
+                    .strong()
+                    .size(14.0),
+            );
+            ui.label(
+                egui::RichText::new(format!("{} • {}", session.origin, session.container_id.0))
+                    .weak()
+                    .size(12.0),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "{:?} • {}",
+                    session.state,
+                    if session.is_live() {
+                        "LIVE".to_string()
+                    } else {
+                        format!(
+                            "{} / {}",
+                            format_ms(session.position_ms),
+                            session
+                                .duration_ms
+                                .map(format_ms)
+                                .unwrap_or_else(|| "?".to_string())
+                        )
+                    }
+                ))
+                .size(12.0),
+            );
+            ui.horizontal(|ui| {
+                if ui.button("⏪").on_hover_text("Back 10s").clicked() {
+                    app.dispatch_media_action(
+                        Some(session.id.clone()),
+                        MediaAction::SkipBackward(10_000),
+                    );
+                }
+                let glyph = if session.is_playing() { "⏸" } else { "▶" };
+                if ui.button(glyph).on_hover_text("Play/Pause").clicked() {
+                    app.dispatch_media_action(
+                        Some(session.id.clone()),
+                        MediaAction::TogglePlayPause,
+                    );
+                }
+                if ui.button("⏩").on_hover_text("Forward 10s").clicked() {
+                    app.dispatch_media_action(
+                        Some(session.id.clone()),
+                        MediaAction::SkipForward(10_000),
+                    );
+                }
+                let mute = if session.muted { "🔇" } else { "🔊" };
+                if ui.button(mute).on_hover_text("Mute").clicked() {
+                    app.dispatch_media_action(Some(session.id.clone()), MediaAction::ToggleMute);
+                }
+            });
+            let mut vol = session.volume * 100.0;
+            if ui
+                .add(egui::Slider::new(&mut vol, 0.0..=100.0).text("Vol"))
+                .changed()
+            {
+                app.dispatch_media_action(
+                    Some(session.id.clone()),
+                    MediaAction::SetVolume(vol / 100.0),
+                );
+            }
+        });
+    }
 }

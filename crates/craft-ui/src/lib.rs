@@ -46,6 +46,47 @@ impl BrowserApp {
         let tab_manager = VerticalTabManager::new();
         let media_hub = MediaHub::new();
 
+        // Seed Firefox-style Multi-Account Container identities so the tab
+        // accent bars and container menu have real backing data (color comes
+        // from Container.color_hex, not decoration).
+        let containers = vec![
+            Container::new(
+                ContainerId::default_container(),
+                "Default",
+                "🏠",
+                "#8f8f9d",
+                0,
+            ),
+            Container::new(
+                ContainerId::new(ContainerId::PERSONAL),
+                "Personal",
+                "👤",
+                "#0053e6",
+                1,
+            ),
+            Container::new(
+                ContainerId::new(ContainerId::WORK),
+                "Work",
+                "💼",
+                "#2ac3a2",
+                2,
+            ),
+            Container::new(
+                ContainerId::new(ContainerId::BANKING),
+                "Banking",
+                "🏦",
+                "#8a2be2",
+                3,
+            ),
+            Container::new(
+                ContainerId::new(ContainerId::SHOPPING),
+                "Shopping",
+                "🛒",
+                "#ff5f00",
+                4,
+            ),
+        ];
+
         let (engine, cmd_sender) = ServoEngine::new(adblock.clone());
 
         Self {
@@ -54,13 +95,41 @@ impl BrowserApp {
             tabs: Vec::new(),
             active_tab_id: None,
             groups: Vec::new(),
-            containers: Vec::new(),
+            containers,
             engine,
             cmd_sender,
             omnibox,
             tab_manager,
             media_hub,
         }
+    }
+
+    /// Look up a container's display color (hex) and icon by id. Falls back to
+    /// the default identity so a tab always has real data to render.
+    pub fn container_identity(&self, id: &ContainerId) -> (String, String, String) {
+        let c = self
+            .containers
+            .iter()
+            .find(|c| &c.id == id)
+            .or_else(|| self.containers.first());
+        match c {
+            Some(c) => (c.name.clone(), c.color_hex.clone(), c.icon.clone()),
+            None => (
+                "Default".to_string(),
+                "#8f8f9d".to_string(),
+                "🏠".to_string(),
+            ),
+        }
+    }
+
+    // -- Container and privacy identity helpers ---------------------------
+
+    pub fn adblock_enabled(&self) -> bool {
+        self.adblock.is_enabled()
+    }
+
+    pub fn set_adblock_enabled(&mut self, enabled: bool) {
+        self.adblock.set_enabled(enabled);
     }
 
     pub fn open_tab(&mut self, url: &str, container_id: ContainerId) -> TabId {
