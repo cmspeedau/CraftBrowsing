@@ -72,3 +72,13 @@ CraftBrowsing targets the latest stable Rust release:
 rustup update stable
 cargo build
 ```
+
+### Build notes
+
+CraftBrowsing links Servo 0.8, which has two build-time requirements that are easy to hit:
+
+- **Style-thread stack.** `.cargo/config.toml` sets `SERVO_STYLE_THREAD_STACK_SIZE_KB = "8192"`. Stylo reads this at compile time; with the 512 KB default, deeply nested CSS on sites like Facebook overflows a style worker and aborts the process. It only reserves virtual address space, so the cost is negligible (upstream Servo uses the same value, see servo/servo#43888). If you change it, rebuild stylo: `cargo clean -p stylo && cargo build`.
+- **`rust-version`.** Servo 0.8 needs Rust 1.88+, so `craft-storage` and `craft-transfers` declare `rust-version = "1.88.0"` and the workspace resolves `image` and other deps against that.
+
+Servo also needs native libraries for GPU media and the web engine (fontconfig, OpenGL/EGL, and on Linux the X11/Wayland client libraries). The default features enable `webgpu`, `webxr`, and `media-gstreamer`; trim them in `Cargo.toml` if your target does not need them.
+
