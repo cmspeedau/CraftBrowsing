@@ -225,22 +225,215 @@ impl ApplicationHandler for BrowserWindowApp {
                     gl_window.window.set_title(&title);
                 }
 
-                let media_count = self.app.media_hub.len();
                 let app = &mut self.app;
+
+                // Sync tab manager from app tabs.
+                app.tab_manager
+                    .sync_from_tabs(&app.tabs, app.active_tab_id.as_ref());
+
+                let media_count = app.media_hub.len();
+                let tabs: Vec<(craft_core::tab::TabId, String, bool)> = app
+                    .tab_manager
+                    .get_render_tree()
+                    .iter()
+                    .map(|v| (v.tab_id.clone(), v.title.clone(), v.is_active))
+                    .collect();
+                let active_url = app
+                    .active_tab_id
+                    .as_ref()
+                    .and_then(|id| app.tabs.iter().find(|t| &t.id == id))
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+
                 egui.run(&gl_window.window, |ui| {
+                    // --- Top toolbar: omnibox + media ---
                     egui::Panel::top("toolbar").show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label("CraftBrowsing");
                             ui.separator();
+
+                            // Container selector
+                            let current_container = app
+                                .active_tab_id
+                                .as_ref()
+                                .and_then(|id| app.tabs.iter().find(|t| &t.id == id))
+                                .map(|t| t.container_id.clone())
+                                .unwrap_or_else(
+                                    craft_core::container::ContainerId::default_container,
+                                );
+                            ui.label(format!("[{}]", current_container.0));
+                            ui.separator();
+
+                            // Omnibox
+                            let mut url_text = if app.omnibox.is_focused {
+                                app.omnibox.input_text.clone()
+                            } else {
+                                active_url.clone()
+                            };
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut url_text)
+                                    .desired_width(ui.available_width() - 120.0)
+                                    .hint_text("Search or enter URL"),
+                            );
+                            if response.gained_focus() {
+                                app.omnibox.is_focused = true;
+                                app.omnibox.input_text = active_url.clone();
+                            }
+                            if response.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                let input = if app.omnibox.is_focused {
+                                    app.omnibox.input_text.clone()
+                                } else {
+                                    url_text.clone()
+                                };
+                                app.submit_omnibox(&input);
+                                app.omnibox.is_focused = false;
+                            }
+                            // Update omnibox text while typing
+                            if response.changed() {
+                                app.omnibox.input_text = url_text.clone();
+                            }
+
+                            ui.separator();
+                            // Media indicator
                             ui.label(format!("Media: {}", media_count));
-                            if ui.button("Play/Pause").clicked() {
+                            if ui.button("\u{25B6}/\u{23F8}").clicked() {
                                 app.dispatch_media_action(None, MediaAction::TogglePlayPause);
                             }
                         });
                     });
+
+                    // --- Tab strip (left side panel) ---
+                    egui::Panel::left("tabs")
+                        .default_size(200.0)
+                        .show(ui, |ui| {
+                            ui.heading("Tabs");
+                            ui.separator();
+                            for (tab_id, title, is_active) in &tabs {
+                                let label = if *is_active {
+                                    format!("> {}", title)
+                                } else {
+                                    title.clone()
+                                };
+                                if ui.selectable_label(*is_active, &label).clicked() {
+                                    app.select_tab(tab_id);
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("+ New Tab").clicked() {
+                                app.open_tab(
+                                    "craft://welcome",
+                                    craft_core::container::ContainerId::default_container(),
+                                );
+                            }
+                        });
+
+                    // --- Media hub (right side panel) ---
+                    egui::Panel::right("media_hub")
+                        .default_size(260.0)
+                        .show(ui, |ui| {
+                            ui.heading("Media Sessions");
+                            ui.separator();
+                            if app.media_hub.is_empty() {
+                                ui.label("No active media.");
+                            } else {
+                                for session in app.media_hub.sessions.clone() {
+                                    ui.group(|ui| {
+                                        ui.label(session.display_title());
+                                        ui.label(format!(
+                                            "{} \u{2022} {}",
+                                            session.origin, session.container_id.0
+                                        ));
+                                        ui.label(format!(
+                                            "{:?} \u{2022} {}",
+                                            session.state,
+                                            if session.is_live() {
+                                                "LIVE".to_string()
+                                            } else {
+                                                format!(
+                                                    "{} / {}",
+                                                    format_ms(session.position_ms),
+                                                    session
+                                                        .duration_ms
+                                                        .map(format_ms)
+                                                        .unwrap_or_else(|| "?".to_string())
+                                                )
+                                            }
+                                        ));
+                                        ui.horizontal(|ui| {
+                                            if ui.button("\u{25C0}\u{25C0}").clicked() {
+                                                app.dispatch_media_action(
+                                                    Some(session.id.clone()),
+                                                    MediaAction::SkipBackward(10_000),
+                                                );
+                                            }
+                                            if ui
+                                                .button(if session.is_playing() {
+                                                    "\u{23F8}"
+                                                } else {
+                                                    "\u{25B6}"
+                                                })
+                                                .clicked()
+                                            {
+                                                app.dispatch_media_action(
+                                                    Some(session.id.clone()),
+                                                    MediaAction::TogglePlayPause,
+                                                );
+                                            }
+                                            if ui.button("\u{25B6}\u{25B6}").clicked() {
+                                                app.dispatch_media_action(
+                                                    Some(session.id.clone()),
+                                                    MediaAction::SkipForward(10_000),
+                                                );
+                                            }
+                                            if ui
+                                                .button(if session.muted {
+                                                    "\u{1F507}"
+                                                } else {
+                                                    "\u{1F50A}"
+                                                })
+                                                .clicked()
+                                            {
+                                                app.dispatch_media_action(
+                                                    Some(session.id.clone()),
+                                                    MediaAction::ToggleMute,
+                                                );
+                                            }
+                                        });
+                                        let mut vol = session.volume * 100.0;
+                                        if ui
+                                            .add(
+                                                egui::Slider::new(&mut vol, 0.0..=100.0)
+                                                    .text("Vol"),
+                                            )
+                                            .changed()
+                                        {
+                                            app.dispatch_media_action(
+                                                Some(session.id.clone()),
+                                                MediaAction::SetVolume(vol / 100.0),
+                                            );
+                                        }
+                                    });
+                                }
+                            }
+                        });
+
+                    // --- Central viewport ---
                     egui::CentralPanel::default().show(ui, |ui| {
-                        ui.label("Browser viewport placeholder");
-                        ui.label("Engine integration pending.");
+                        ui.label("Browser viewport");
+                        ui.label("Servo rendering pending engine integration.");
+                        ui.separator();
+                        if let Some(active_id) = &app.active_tab_id {
+                            if let Some(tab) = app.tabs.iter().find(|t| &t.id == active_id) {
+                                ui.label(format!("Active tab: {}", tab.title));
+                                ui.label(format!("URL: {}", tab.url));
+                                ui.label(format!("Container: {}", tab.container_id.0));
+                                ui.label(format!("State: {:?}", tab.state));
+                            }
+                        } else {
+                            ui.label("No active tab. Press Ctrl+T to open one.");
+                        }
                     });
                 });
 
@@ -350,4 +543,11 @@ impl BrowserWindowApp {
             _ => {}
         }
     }
+}
+
+fn format_ms(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    let mins = total_secs / 60;
+    let secs = total_secs % 60;
+    format!("{}:{:02}", mins, secs)
 }
