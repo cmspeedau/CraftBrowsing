@@ -167,6 +167,26 @@ pub fn run_window_event_loop() -> Result<(), Box<dyn std::error::Error>> {
     BrowserWindowApp::run()
 }
 
+impl Drop for BrowserWindowApp {
+    fn drop(&mut self) {
+        // Teardown order matters: the egui glow painter and Servo/WebRender both
+        // free GL resources, so the surfman context must stay alive and current
+        // until they are done, and the window surface must outlive the context.
+        // Dropping these fields in declaration order would free the context first
+        // and segfault on exit.
+        if let (Some(egui), Some(rc)) = (self.egui.as_mut(), self.rendering_context.as_ref()) {
+            let _ = rc.make_current();
+            egui.destroy();
+        }
+        self.webview = None;
+        self.offscreen = None;
+        self.egui = None;
+        self.servo = None;
+        self.rendering_context = None;
+        self.window = None;
+    }
+}
+
 impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -207,9 +227,11 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
             .event_loop_waker(Box::new(waker))
             .build();
 
-        // Create offscreen context + webview.
-        let offscreen = Rc::new(rendering_context.offscreen_context(window.inner_size()));
-        let offscreen_rc: Rc<dyn RenderingContext> = offscreen.clone();
+        // The webview renders straight into the window's RenderingContext, like
+        // servo's winit_minimal example. egui composites its chrome over those
+        // pixels in the same GL context, so there is no offscreen FBO to blit
+        // (the old blit path silently produced chrome over a blank window).
+        let webview_context: Rc<dyn RenderingContext> = rendering_context.clone();
 
         let delegate = Rc::new(BrowserWebViewDelegate {
             window: window.clone(),
@@ -223,7 +245,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
         self.page.lock().unwrap().url = url.to_string();
         self.omnibox_buffer = url.to_string();
 
-        let webview = WebViewBuilder::new(&servo, offscreen_rc)
+        let webview = WebViewBuilder::new(&servo, webview_context)
             .url(url)
             .hidpi_scale_factor(Scale::new(window.scale_factor() as f32))
             .delegate(delegate)
@@ -245,7 +267,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
         self.rendering_context = Some(rendering_context);
         self.servo = Some(servo);
         self.webview = Some(webview);
-        self.offscreen = Some(offscreen);
+        self.offscreen = None;
         self.egui = Some(egui);
 
         if self.app.tabs.is_empty() {
@@ -307,33 +329,14 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                 // Make GL context current.
                 rendering_context.make_current().expect("make_current");
 
-                // Render the webview into its offscreen context.
+                // Render the page into the window's default framebuffer. This is
+                // the same GL context egui paints its chrome into, so egui's
+                // meshes composite over the page (transparent central panel).
                 if let Some(webview) = self.webview.as_ref() {
                     webview.paint();
                 }
 
-                // Clear the window framebuffer.
-                unsafe {
-                    use glow::HasContext as _;
-                    let gl = rendering_context.glow_gl_api();
-                    gl.clear_color(0.1, 0.1, 0.12, 1.0);
-                    gl.clear(glow::COLOR_BUFFER_BIT);
-                }
-
-                // Blit the offscreen webview into the window before egui paints.
-                if let Some(offscreen) = self.offscreen.as_ref()
-                    && let Some(blit) = offscreen.render_to_parent_callback()
-                {
-                    let size = rendering_context.size();
-                    let gl = rendering_context.glow_gl_api();
-                    let rect = euclid::default::Rect::new(
-                        euclid::default::Point2D::new(0, 0),
-                        euclid::default::Size2D::new(size.width as i32, size.height as i32),
-                    );
-                    blit(&gl, rect);
-                }
-
-                // Run egui UI over the blitted page.
+                // Run egui UI over the painted page.
                 let app = &mut self.app;
                 let webview_nav = self.webview.clone();
                 let page = self.page.clone();
@@ -497,6 +500,13 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
 
                                     ui.add_space(4.0);
                                     // URL bar (pill) with a tracking-protection shield.
+                                    // Reserve room for the right-side cluster so the pill
+                                    // stops at the buttons instead of stretching under them.
+                                    let right_reserve = 104.0; // media toggle + menu + spacing
+                                    let pill_chrome = 56.0; // inner margins + shield glyph
+                                    let text_width =
+                                        (ui.available_width() - right_reserve - pill_chrome)
+                                            .max(140.0);
                                     let protected_now = app.adblock_enabled();
                                     let shield = if protected_now { "🛡" } else { "⚠" };
                                     egui::Frame::new()
@@ -520,14 +530,14 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                                 }
                                                 let resp = ui.add(
                                                     egui::TextEdit::singleline(buffer)
-                                                        .desired_width(
-                                                            ui.available_width().max(120.0),
-                                                        )
+                                                        .desired_width(text_width)
                                                         .hint_text("Search or enter address"),
                                                 );
-                                                let enter = ui
-                                                    .input(|i| i.key_pressed(egui::Key::Enter))
-                                                    && resp.has_focus();
+                                                // Pressing Enter on a single-line field makes it
+                                                // lose focus the same frame, so detect the commit via
+                                                // lost_focus, not has_focus.
+                                                let enter = resp.lost_focus()
+                                                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
                                                 if enter {
                                                     let target = match OmniboxState::resolve_input(
                                                         buffer,
@@ -544,7 +554,6 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                                     {
                                                         wv.load(parsed);
                                                     }
-                                                    resp.surrender_focus();
                                                 }
                                             });
                                         });
