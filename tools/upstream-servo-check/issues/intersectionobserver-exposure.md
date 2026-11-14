@@ -1,65 +1,52 @@
 INTERNAL EVIDENCE ONLY - DO NOT SUBMIT THIS TEXT AS AN ISSUE.
-Servo's AI policy forbids AI-authored issue descriptions. Use this only to help a
-human reproduce and validate the finding, then write the upstream report yourself.
+Servo's AI policy forbids AI-authored issue text. A human validates the finding
+against a Servo main build, then writes the report. Our own standard for the
+shape lives in docs/making-submissions.md.
+
 ---
 
-IntersectionObserver class exists in script but is not exposed on the Window global
+Result (on servo 0.8.0): `new IntersectionObserver(...)` throws
+`ReferenceError: IntersectionObserver is not defined`, so ABC News renders its
+Next.js client-side error page instead of the site. The class is implemented in
+the engine but not installed on the window global.
 
-Component: DOM / script
-Severity: load-breaking for many real sites
+Status vs main: UNVERIFIED. Merge history (#49407, #48581, and today's #49800
+which uses IO for lazy loading) suggests main already exposes and uses it.
+Confirm with tools/upstream-servo-check before treating this as reportable. If
+main is fine, the real gap is that our pinned 0.8.0 predates the fix, and the
+finding is "needs a newer engine baseline", not "unimplemented".
 
-## Summary
+## Reproduce (smallest input)
 
-`servo-script` ships a full `IntersectionObserver` implementation
-(`components/script/dom/intersectionobserver/`) including a `Constructor`, but the
-interface is not reachable from JS: `typeof window.IntersectionObserver === "undefined"`
-and `new IntersectionObserver(...)` throws `ReferenceError: IntersectionObserver is not
-defined`. Sites that construct it eagerly fail before render.
+Open fixture io-repro.html (one file, only touches the API):
+- main output line: `typeof window.IntersectionObserver`
+- on 0.8.0: `undefined`, and construction throws `ReferenceError`.
+- expected: `function`, and a no-arg `observe()` runs without throwing.
 
-This appears to be the same root cause as the exposure part of tracking issue #35767
-(Tracking issue: IntersectionObserver); filing as a focused, minimized repro.
+Real-site repro: load https://www.abc.net.au/ and watch the page console for
+`IntersectionObserver is not defined`.
 
-## Environment
-
-- Engine baseline: `servo` crate 0.8.0 (latest tagged release on crates.io; no
-  nightly artifacts).
-- Platform: Linux x86_64 (X11/Wayland), GPU NVIDIA.
-- Embedding: a custom winit + Servo embed (CraftBrowsing). Page console captured via
-  `WebViewDelegate::show_console_message`.
-
-## Minimized repro
-
-```html
-<script>
-  console.log(typeof window.IntersectionObserver);           // "undefined" (expected "function")
-  console.log("IntersectionObserver" in window);             // false
-  new IntersectionObserver(function () {}, { threshold: 0 }); // ReferenceError
-</script>
-```
-
-## Observed (from a real site, ABC News, Next.js)
+## Evidence (captured, not summarized)
 
 ```
 [page console] Error: (new ReferenceError("IntersectionObserver is not defined",
   "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-...js", 1))
 [page console] Error: A client-side exception has occurred,
-  see https://nextjs.org/docs/messages/client-side-exception-occurred
+  https://nextjs.org/docs/messages/client-side-exception-occurred
 ```
 
-The document itself returns HTTP 200 and parses; the app throws during hydration and
-renders its error boundary. So this is an API-exposure gap, not a network or layout bug.
+The ABC document returns HTTP 200 and parses; the app throws during hydration, so
+this is an API-exposure gap, not a network or layout bug.
 
-## Expected
+## Environment
 
-`IntersectionObserver` is defined on `Window` (it is `[Exposed=Window]`) and
-`new IntersectionObserver(cb, opts)` constructs and `observe()` runs, per
-https://wicg.github.io/IntersectionObserver/.
+- Engine baseline: servo crate 0.8.0 (latest tagged on crates.io; no nightly).
+- Code present: components/script/dom/intersectionobserver/ with a real Constructor.
+- Platform: Linux x86_64, X11/Wayland, NVIDIA.
+- Related upstream tracking: issue #35767 (Tracking issue: IntersectionObserver).
 
-## Notes
+## Expected on a compliant engine
 
-- The class has a real `Constructor` and `#[dom_struct]`; my read is that the generated
-  `Install`/interface registration is not wired into the window global list, even though the
-  implementation is present. If this is intentional (feature-gated), then it should at
-  minimum be gated consistently with the spec's default-on status for browsers.
-- Happy to retest against `main`; we are currently on the published 0.8.0 because there is
-  no prebuilt nightly to run.
+`IntersectionObserver` is on the Window global (`[Exposed=Window]`) and
+`new IntersectionObserver(cb, opts)` constructs and observes per
+https://wicg.github.io/intersectionobserver/.
