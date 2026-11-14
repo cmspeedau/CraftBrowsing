@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>IntersectionObserver exposure probe</title>
+<body>
+<p id="r">running…</p>
+<script>
+// Minimized reproduction: on Servo 0.8.0 the IO class exists in the engine but
+// is NOT exposed on the window global, so this throws exactly like real sites
+// (e.g. ABC News). Expected on a compliant engine: all checks report OK.
+(function () {
+  const out = [];
+  function record(s) { out.push(s); document.getElementById('r').textContent = out.join(' | '); }
+  try {
+    record("typeof window.IntersectionObserver = " + (typeof window.IntersectionObserver));
+    record("'IntersectionObserver' in window = " + ("IntersectionObserver" in window));
+    // The construct that real sites perform eagerly:
+    const obs = new IntersectionObserver(function (entries) { /* noop */ }, { threshold: 0 });
+    record("constructed IO ok");
+    obs.observe(document.body);
+    record("observe() ok");
+    obs.disconnect();
+    record("DISPOSITION: OK");
+  } catch (e) {
+    record("THREW: " + (e && e.name ? e.name : "unknown") + ": " + (e && e.message ? e.message : String(e)));
+    record("DISPOSITION: BROKEN");
+  }
+  // Surface it to the console too so headless log capture sees it.
+  if (out.some(function (s) { return s.indexOf("BROKEN") >= 0; })) {
+    console.error("[io-probe] IntersectionObserver is not usable: " + out.join(" | "));
+  } else {
+    console.log("[io-probe] IntersectionObserver OK: " + out.join(" | "));
+  }
+})();
+</script>
+</body>
+</html>
