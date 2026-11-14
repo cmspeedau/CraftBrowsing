@@ -227,11 +227,14 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
             .event_loop_waker(Box::new(waker))
             .build();
 
-        // The webview renders straight into the window's RenderingContext, like
-        // servo's winit_minimal example. egui composites its chrome over those
-        // pixels in the same GL context, so there is no offscreen FBO to blit
-        // (the old blit path silently produced chrome over a blank window).
-        let webview_context: Rc<dyn RenderingContext> = rendering_context.clone();
+        // The webview renders into its own offscreen context, sized to the
+        // content region below the chrome, and is blitted into the window
+        // surface via an egui background paint callback. This is servoshell's
+        // model (see servo issue #38369): egui draws the chrome into the window
+        // surface, and the page occupies only the area under the toolbar, so
+        // the page top is never clipped by the chrome.
+        let offscreen = Rc::new(rendering_context.offscreen_context(window.inner_size()));
+        let webview_context: Rc<dyn RenderingContext> = offscreen.clone();
 
         let delegate = Rc::new(BrowserWebViewDelegate {
             window: window.clone(),
@@ -251,7 +254,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
             .delegate(delegate)
             .build();
 
-        // egui context using Servo's GL, styled to the Firefox chrome palette.
+        // egui paints its chrome directly into the window surface.
         let gl = rendering_context.glow_gl_api();
         let egui = EguiGlow::new(event_loop, gl, None, None, true);
         egui.egui_ctx.set_visuals(firefox_visuals());
@@ -267,7 +270,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
         self.rendering_context = Some(rendering_context);
         self.servo = Some(servo);
         self.webview = Some(webview);
-        self.offscreen = None;
+        self.offscreen = Some(offscreen);
         self.egui = Some(egui);
 
         if self.app.tabs.is_empty() {
@@ -295,13 +298,10 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
+                // Resize the window surface only. The offscreen webview context is
+                // re-fitted to the content rect on the next paint pass, so forcing
+                // it to the full window here is what clipped the page top.
                 rendering_context.resize(new_size);
-                if let Some(offscreen) = self.offscreen.as_ref() {
-                    offscreen.resize(new_size);
-                }
-                if let Some(webview) = self.webview.as_ref() {
-                    webview.resize(new_size);
-                }
                 window.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -326,19 +326,13 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
 
                 let _ = self.app.poll_engine_events();
 
-                // Make GL context current.
+                // Make GL context current (shared by the window and offscreen).
                 rendering_context.make_current().expect("make_current");
 
-                // Render the page into the window's default framebuffer. This is
-                // the same GL context egui paints its chrome into, so egui's
-                // meshes composite over the page (transparent central panel).
-                if let Some(webview) = self.webview.as_ref() {
-                    webview.paint();
-                }
-
-                // Run egui UI over the painted page.
+                // Run egui UI; the page is composited inside the layout (below).
                 let app = &mut self.app;
                 let webview_nav = self.webview.clone();
+                let offscreen = self.offscreen.clone();
                 let page = self.page.clone();
                 let buffer = &mut self.omnibox_buffer;
                 let webview_home = self.home_url.clone();
@@ -612,6 +606,53 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                 });
                         }
 
+                        // ---- Composite the page into the content region ----
+                        // Everything above (tab strip, toolbar, media panel) has
+                        // reserved its space, so the available rect is the page area.
+                        let content_rect = ui.available_rect_before_wrap();
+                        if let (Some(wv), Some(off)) = (&webview_nav, &offscreen) {
+                            let ppp = ui.ctx().pixels_per_point();
+                            let cw = (content_rect.width() * ppp).max(1.0) as u32;
+                            let ch = (content_rect.height() * ppp).max(1.0) as u32;
+                            let cur = wv.size();
+                            if cur.width as u32 != cw || cur.height as u32 != ch {
+                                // Resizes the shared offscreen context (new FBO id),
+                                // so this runs before we build the blit callback.
+                                wv.resize(winit::dpi::PhysicalSize::new(cw, ch));
+                            }
+
+                            // Render the page into the offscreen framebuffer.
+                            wv.paint();
+
+                            // Blit the offscreen into the window surface at the
+                            // content rect, on the background layer so the chrome
+                            // draws over its own region. `from_bottom_px` matches
+                            // surfman's bottom-left GL origin.
+                            if let Some(render_to_parent) = off.render_to_parent_callback() {
+                                ui.ctx()
+                                    .layer_painter(egui::LayerId::background())
+                                    .add(egui::PaintCallback {
+                                        rect: content_rect,
+                                        callback: Arc::new(egui_glow::CallbackFn::new(
+                                            move |info, painter| {
+                                                let clip = info.viewport_in_pixels();
+                                                let rect_in_parent = euclid::default::Rect::new(
+                                                    euclid::default::Point2D::new(
+                                                        clip.left_px,
+                                                        clip.from_bottom_px,
+                                                    ),
+                                                    euclid::default::Size2D::new(
+                                                        clip.width_px,
+                                                        clip.height_px,
+                                                    ),
+                                                );
+                                                render_to_parent(painter.gl(), rect_in_parent);
+                                            },
+                                        )),
+                                    });
+                            }
+                        }
+
                         // ---- Central viewport: transparent so the page shows through ----
                         egui::CentralPanel::default()
                             .frame(egui::Frame::new().fill(egui::Color32::TRANSPARENT))
@@ -673,6 +714,11 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                         }
                     });
 
+                    // Bind the window surface as the draw target (the page paint
+                    // above left the offscreen FBO bound) so egui's chrome draws to
+                    // the window, not the offscreen buffer.
+                    rendering_context.make_current().expect("make_current");
+                    rendering_context.prepare_for_rendering();
                     egui.paint(&window_ref);
                 }
 
