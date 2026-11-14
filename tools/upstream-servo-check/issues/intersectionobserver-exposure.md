@@ -1,3 +1,8 @@
+INTERNAL EVIDENCE ONLY - DO NOT SUBMIT THIS TEXT AS AN ISSUE.
+Servo's AI policy forbids AI-authored issue descriptions. Use this only to help a
+human reproduce and validate the finding, then write the upstream report yourself.
+---
+
 IntersectionObserver class exists in script but is not exposed on the Window global
 
 Component: DOM / script

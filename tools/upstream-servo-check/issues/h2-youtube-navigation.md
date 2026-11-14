@@ -1,3 +1,8 @@
+INTERNAL EVIDENCE ONLY - DO NOT SUBMIT THIS TEXT AS AN ISSUE.
+Servo's AI policy forbids AI-authored issue descriptions. Use this only to help a
+human reproduce and validate the finding, then write the upstream report yourself.
+---
+
 HTTP/2 navigation fails on www.youtube.com: local h2 reset with PROTOCOL_ERROR (Library)
 
 Component: net
