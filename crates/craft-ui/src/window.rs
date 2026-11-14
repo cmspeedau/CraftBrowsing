@@ -9,10 +9,10 @@ use egui_glow::EguiGlow;
 use euclid::Scale;
 
 use servo::{
-    EventLoopWaker, LoadStatus, OffscreenRenderingContext, RenderingContext, Servo, ServoBuilder,
-    WebView, WebViewBuilder, WebViewDelegate, WindowRenderingContext,
+    ConsoleLogLevel, EventLoopWaker, LoadStatus, OffscreenRenderingContext, RenderingContext,
+    Servo, ServoBuilder, WebView, WebViewBuilder, WebViewDelegate, WindowRenderingContext,
 };
-use tracing::info;
+use tracing::{error, info, warn};
 use url::Url;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -70,6 +70,26 @@ impl WebViewDelegate for BrowserWebViewDelegate {
             page.loading = matches!(status, LoadStatus::Started | LoadStatus::HeadParsed);
             page.can_go_back = webview.can_go_back();
             page.can_go_forward = webview.can_go_forward();
+        }
+        self.window.request_redraw();
+    }
+
+    fn show_console_message(&self, _: WebView, level: ConsoleLogLevel, message: String) {
+        // Surface page console output so JS/runtime errors (e.g. a Next.js app
+        // hitting an unsupported Web API and rendering its error route) are
+        // captured in the browser log rather than only visible on screen.
+        match level {
+            ConsoleLogLevel::Error | ConsoleLogLevel::Warn => {
+                warn!("[page console] {:?}: {}", level, message);
+            }
+            _ => info!("[page console] {:?}: {}", level, message),
+        }
+    }
+
+    fn notify_crashed(&self, _: WebView, reason: String, backtrace: Option<String>) {
+        error!("WebView pipeline crashed: {reason}");
+        if let Some(bt) = backtrace {
+            error!("crash backtrace: {bt}");
         }
         self.window.request_redraw();
     }
