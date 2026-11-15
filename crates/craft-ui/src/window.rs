@@ -395,6 +395,9 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                 }
 
                 let _ = self.app.poll_engine_events();
+                // Filter list downloads finish on their own thread; compiling the
+                // new rules happens here, on the UI thread, once a pass is done.
+                self.app.poll_list_updates();
 
                 // Keep the address bar showing the page's real URL, redirects
                 // included, unless the caret is in the bar.
@@ -806,19 +809,45 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                         *menu_open = false;
                                     }
                                     // The shield is a claim, so the menu shows
-                                    // what is behind it: compiled rules and real
-                                    // blocks this session, both read from the
-                                    // engine's request hook.
+                                    // what is behind it: every loaded rule group,
+                                    // what each last did, and the real blocks this
+                                    // session.
                                     ui.separator();
                                     ui.label(
                                         egui::RichText::new(format!(
-                                            "{} rules loaded, {} requests blocked",
+                                            "{} rules loaded, {} requests blocked this session",
                                             app.filter_rule_count(),
                                             app.blocked_requests()
                                         ))
                                         .weak()
                                         .size(12.0),
                                     );
+                                    let updating = app.lists_updating();
+                                    let update_button = egui::Button::new(
+                                        egui::RichText::new(if updating {
+                                            "Updating filter lists..."
+                                        } else {
+                                            "Update filter lists now"
+                                        })
+                                        .size(13.0),
+                                    );
+                                    if ui
+                                        .add_enabled(!updating, update_button)
+                                        .on_hover_text(
+                                            "Downloads EasyList, EasyPrivacy and uBlock filters \
+                                             over HTTPS. Nothing is fetched unless you press \
+                                             this, and a failed download keeps the previous copy.",
+                                        )
+                                        .clicked()
+                                    {
+                                        app.update_filter_lists();
+                                    }
+                                    for line in app.filter_list_status() {
+                                        ui.label(egui::RichText::new(line).size(11.0));
+                                    }
+                                    for line in app.filter_list_log().to_vec() {
+                                        ui.label(egui::RichText::new(line).weak().size(11.0));
+                                    }
                                     if ui.button("Close").clicked() {
                                         *menu_open = false;
                                     }

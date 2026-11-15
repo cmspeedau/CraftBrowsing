@@ -23,3 +23,5 @@ egui-winit = { workspace = true }
 egui_glow = { workspace = true }
 glow = { workspace = true }
 rustls = { workspace = true }
+reqwest = { workspace = true }
+dirs = { workspace = true }

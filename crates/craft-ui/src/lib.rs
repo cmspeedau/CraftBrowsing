@@ -1,18 +1,24 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
+pub mod lists;
 pub mod omnibox;
 pub mod shields;
 pub mod tab_manager;
 pub mod window;
 
 use craft_adblock::AdblockManager;
+use craft_adblock::upstream::{DEFAULT_SOURCES, ListStore, SourceAction};
 use craft_core::container::{Container, ContainerId};
 use craft_core::media::{MediaAction, MediaHub, MediaSessionEvent, MediaSessionId};
 use craft_core::tab::{Tab, TabGroup, TabId};
 use craft_engine::{Backend, Engine, EngineEvent, PageSlot, ServoPageController, TabEngine};
 use craft_sync::protocol::SyncPreferences;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::info;
+use std::sync::mpsc::Receiver;
+use tracing::{info, warn};
+
+use crate::lists::UpdateEvent;
 
 pub use omnibox::{OmniboxState, OmniboxTarget};
 pub use shields::ShieldStats;
@@ -21,9 +27,18 @@ pub use window::{BrowserWindowApp, run_window_event_loop};
 
 pub struct BrowserApp {
     pub adblock: Arc<AdblockManager>,
-    /// Requests refused by a filter rule this session. The engine delegate
-    /// records into it; the chrome reads from it.
+    /// Session counters for refused requests: the engine's request hook writes,
+    /// the chrome reads.
     pub shields: Arc<ShieldStats>,
+    /// On-disk cache for upstream filter lists.
+    list_store: ListStore,
+    /// Receiver for the in-flight update pass, if one is running.
+    list_updates: Option<Receiver<UpdateEvent>>,
+    /// Sources that finished but are not compiled yet: the engine is rebuilt
+    /// once at the end of a pass rather than once per list.
+    pending_lists: Vec<SourceAction>,
+    /// Outcome lines from the most recent update pass, newest last.
+    list_log: Vec<String>,
     pub sync_preferences: SyncPreferences,
     pub tabs: Vec<Tab>,
     pub active_tab_id: Option<TabId>,
@@ -49,6 +64,12 @@ impl BrowserApp {
         #[allow(clippy::arc_with_non_send_sync)]
         let adblock = Arc::new(AdblockManager::new());
         let shields = ShieldStats::new();
+
+        // Lists downloaded earlier are read back from disk here, with no network
+        // traffic, so protection does not depend on the user pressing the button
+        // again every session.
+        let list_store = ListStore::new(filter_list_dir());
+        install_cached_lists(&adblock, &list_store);
         let sync_preferences = SyncPreferences::default();
         let omnibox = OmniboxState::new("", ContainerId::default_container());
         let tab_manager = VerticalTabManager::new();
@@ -106,6 +127,10 @@ impl BrowserApp {
         Self {
             adblock,
             shields,
+            list_store,
+            list_updates: None,
+            pending_lists: Vec::new(),
+            list_log: Vec::new(),
             sync_preferences,
             tabs: Vec::new(),
             active_tab_id: None,
@@ -261,6 +286,140 @@ impl BrowserApp {
             } else {
                 self.omnibox.set_text("");
             }
+        }
+    }
+
+    // -- Upstream filter lists -------------------------------------------------
+
+    /// Start an update pass over the known upstream filter lists.
+    ///
+    /// This is the only path that fetches rules from the network. Nothing is
+    /// fetched at startup: a default network call is forbidden by the privacy
+    /// invariants, so lists arrive on this explicit user action and are read back
+    /// from the on-disk cache on every later start.
+    pub fn update_filter_lists(&mut self) {
+        if self.list_updates.is_some() {
+            self.push_list_log("already updating: one pass at a time".to_string());
+            return;
+        }
+        match lists::spawn_update(self.list_store.clone()) {
+            Some(receiver) => {
+                self.list_updates = Some(receiver);
+                self.push_list_log(format!(
+                    "updating {} filter lists from upstream",
+                    DEFAULT_SOURCES.len()
+                ));
+            }
+            None => self.push_list_log("could not start the filter list updater".to_string()),
+        }
+    }
+
+    /// Collect update events, and compile the new lists into the running matcher
+    /// once the pass has finished. Call once per frame from the chrome.
+    ///
+    /// Compilation happens here, on the UI thread, because `adblock`'s engine is
+    /// neither `Send` nor `Sync`. Batching every list in the pass into one rebuild
+    /// costs about 0.3 s measured on 141k rule lines, instead of once per list.
+    pub fn poll_list_updates(&mut self) {
+        let Some(receiver) = self.list_updates.take() else {
+            return;
+        };
+
+        let mut actions = Vec::new();
+        let mut finished = None;
+        while let Ok(event) = receiver.try_recv() {
+            match event {
+                UpdateEvent::Source(action) => {
+                    self.push_list_log(describe_action(&action));
+                    actions.push(action);
+                }
+                UpdateEvent::Finished {
+                    updated,
+                    unchanged,
+                    failed,
+                } => finished = Some((updated, unchanged, failed)),
+            }
+        }
+        self.pending_lists.extend(actions);
+
+        match finished {
+            Some((updated, unchanged, failed)) => {
+                let rules = self.apply_pending_lists();
+                self.push_list_log(format!(
+                    "pass finished: {updated} updated, {unchanged} unchanged, {failed} failed; {rules} rules compiled"
+                ));
+                self.list_updates = None;
+            }
+            None => self.list_updates = Some(receiver),
+        }
+    }
+
+    /// The loaded rule groups (bundled rules plus any cached lists), for display.
+    pub fn filter_list_status(&self) -> Vec<String> {
+        self.adblock
+            .groups()
+            .iter()
+            .map(|group| {
+                format!(
+                    "{}: {} rules, {}",
+                    group.title,
+                    group.accepted,
+                    age_label(group.updated_unix)
+                )
+            })
+            .collect()
+    }
+
+    /// Outcome lines from the most recent pass, newest last.
+    pub fn filter_list_log(&self) -> &[String] {
+        &self.list_log
+    }
+
+    pub fn lists_updating(&self) -> bool {
+        self.list_updates.is_some()
+    }
+
+    /// Install every updated list from the finished pass in one rebuild, and
+    /// return the total compiled rule count.
+    fn apply_pending_lists(&mut self) -> usize {
+        let pending = std::mem::take(&mut self.pending_lists);
+        let updates: Vec<(&str, &str, String, Option<i64>)> = pending
+            .iter()
+            .filter_map(|action| match action {
+                SourceAction::Updated {
+                    source_id,
+                    title,
+                    text,
+                    fetched_at_unix,
+                } => Some((
+                    source_id.as_str(),
+                    title.as_str(),
+                    text.clone(),
+                    Some(*fetched_at_unix),
+                )),
+                _ => None,
+            })
+            .collect();
+
+        if updates.is_empty() {
+            return self.adblock.rule_count();
+        }
+
+        let reports = self.adblock.install_lists(updates);
+        let rejected: usize = reports.iter().map(|report| report.rejected).sum();
+        if rejected > 0 {
+            self.push_list_log(format!("{rejected} rules refused by the parser this pass"));
+        }
+        self.adblock.rule_count()
+    }
+
+    fn push_list_log(&mut self, line: String) {
+        info!("shields: {line}");
+        self.list_log.push(line);
+        const KEEP: usize = 8;
+        if self.list_log.len() > KEEP {
+            let excess = self.list_log.len() - KEEP;
+            self.list_log.drain(..excess);
         }
     }
 
@@ -445,4 +604,250 @@ fn uuid_v4_stub() -> String {
         .unwrap()
         .as_nanos();
     format!("tab-{:x}", nanos)
+}
+
+/// Where cached filter lists live: the platform data directory, with the temp
+/// directory as a last resort. These files are a cache, not user state, so
+/// losing them costs nothing but the next manual update.
+/// Where this build keeps its downloaded filter lists, so the location is citable
+/// from docs, tests and diagnostics.
+pub fn filter_list_dir() -> PathBuf {
+    let root = match dirs::data_dir() {
+        Some(root) => root,
+        None => {
+            warn!(
+                "shields: no platform data directory, caching filter lists in the temp directory"
+            );
+            std::env::temp_dir()
+        }
+    };
+    root.join("craftbrowsing").join("filterlists")
+}
+
+/// Load every cached list into the manager in one rebuild.
+fn install_cached_lists(adblock: &AdblockManager, store: &ListStore) {
+    let cached = store.load_all(&DEFAULT_SOURCES);
+    if cached.is_empty() {
+        info!(
+            "shields: no cached filter lists in {}, using the bundled rules only",
+            store.dir().display()
+        );
+        return;
+    }
+    let reports = adblock.install_lists(cached.iter().map(|list| {
+        (
+            list.meta.source_id.as_str(),
+            list.meta.title.as_str(),
+            list.text.clone(),
+            Some(list.meta.fetched_at_unix),
+        )
+    }));
+    let rules: usize = reports.iter().map(|report| report.accepted).sum();
+    info!(
+        "shields: loaded {} cached filter lists, {rules} rules compiled, {} rules total",
+        cached.len(),
+        adblock.rule_count()
+    );
+}
+
+/// One line per source for the menu, phrased so a failure is visible as a
+/// failure rather than silence.
+fn describe_action(action: &SourceAction) -> String {
+    match action {
+        SourceAction::Updated {
+            source_id,
+            title,
+            text,
+            ..
+        } => format!("{title} ({source_id}): downloaded {} bytes", text.len()),
+        SourceAction::Unchanged { title, .. } => format!("{title}: still current"),
+        SourceAction::Failed {
+            title,
+            reason,
+            source_id,
+            ..
+        } => format!("{title} ({source_id}): kept the previous copy, {reason}"),
+    }
+}
+
+fn age_label(updated_unix: Option<i64>) -> String {
+    let Some(then) = updated_unix else {
+        return "ships with the browser".to_string();
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(then);
+    let minutes = (now - then).max(0) / 60;
+    match minutes {
+        0 => "just now".to_string(),
+        1..=59 => format!("{minutes} min ago"),
+        60..=1_439 => format!("{} h ago", minutes / 60),
+        _ => format!("{} d ago", minutes / 1_440),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use craft_adblock::upstream::ListMeta;
+
+    fn now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    /// These strings are what the user reads instead of a number they can check,
+    /// so the wording and the units are part of the feature.
+    #[test]
+    fn list_status_and_log_lines_say_what_is_true() {
+        assert_eq!(age_label(None), "ships with the browser");
+        assert_eq!(age_label(Some(now())), "just now");
+        assert_eq!(age_label(Some(now() - 5 * 60)), "5 min ago");
+        assert_eq!(age_label(Some(now() - 3 * 3600)), "3 h ago");
+        assert_eq!(age_label(Some(now() - 2 * 86_400)), "2 d ago");
+        // A clock skew into the future must not read as a negative age.
+        assert_eq!(age_label(Some(now() + 3600)), "just now");
+
+        let updated = SourceAction::Updated {
+            source_id: "easylist".to_string(),
+            title: "EasyList".to_string(),
+            text: "x".repeat(2048),
+            fetched_at_unix: now(),
+        };
+        assert_eq!(
+            describe_action(&updated),
+            "EasyList (easylist): downloaded 2048 bytes"
+        );
+        assert_eq!(
+            describe_action(&SourceAction::Unchanged {
+                source_id: "easyprivacy".to_string(),
+                title: "EasyPrivacy".to_string(),
+            }),
+            "EasyPrivacy: still current"
+        );
+        let failed = describe_action(&SourceAction::Failed {
+            source_id: "ublock-filters".to_string(),
+            title: "uBlock filters".to_string(),
+            reason: "server returned HTTP 503".to_string(),
+        });
+        assert!(failed.starts_with("uBlock filters (ublock-filters): kept the previous copy"));
+        assert!(failed.contains("503"), "{failed}");
+    }
+
+    #[test]
+    fn cached_lists_are_installed_at_startup_and_counted() {
+        let dir = std::env::temp_dir().join(format!(
+            "craft-ui-startup-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = ListStore::new(&dir);
+        let source = &DEFAULT_SOURCES[0];
+        let body = format!("[Adblock Plus 2.0]\n! Title: {}\n", source.title)
+            + "||startup-check.example.test^\n";
+        let meta = ListMeta {
+            source_id: source.id.to_string(),
+            title: source.title.to_string(),
+            url: source.url.to_string(),
+            fetched_at_unix: now(),
+            etag: None,
+            last_modified: None,
+            bytes: body.len() as u64,
+        };
+        store.save(source, &meta, &body).unwrap();
+
+        let adblock = AdblockManager::new();
+        let bundled = adblock.rule_count();
+        install_cached_lists(&adblock, &store);
+
+        assert_eq!(adblock.rule_count(), bundled + 1);
+        assert!(adblock.check_network_request(
+            "https://startup-check.example.test/pixel.js",
+            "https://site.test/",
+            craft_adblock::SCRIPT,
+        ));
+        let status = adblock.groups();
+        assert_eq!(status.len(), 2, "bundled plus the cached list");
+        assert_eq!(status[1].title, source.title);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_empty_cache_leaves_the_bundled_rules_alone() {
+        let dir = std::env::temp_dir().join(format!(
+            "craft-ui-nocache-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = ListStore::new(&dir);
+        let adblock = AdblockManager::new();
+        let before = adblock.rule_count();
+        install_cached_lists(&adblock, &store);
+        assert_eq!(adblock.rule_count(), before);
+        assert_eq!(adblock.groups().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn one_update_pass_at_a_time() {
+        // No real pass here: starting one would hit the network from a unit test.
+        // The guard is what matters, so the in-flight state is set directly.
+        let mut app = BrowserApp::new();
+        assert!(!app.lists_updating());
+
+        let (sender, receiver) = std::sync::mpsc::channel::<UpdateEvent>();
+        app.list_updates = Some(receiver);
+        assert!(app.lists_updating());
+
+        app.update_filter_lists();
+        assert!(
+            app.filter_list_log()
+                .last()
+                .unwrap()
+                .contains("already updating"),
+            "a second click must refuse rather than start a competing writer: {:?}",
+            app.filter_list_log()
+        );
+
+        // A pass that reported one updated source installs it when it finishes.
+        let body = "[Adblock Plus 2.0]\n! Title: T\n||guard-check.example.test^\n".to_string();
+        let before = app.adblock.rule_count();
+        assert!(
+            sender
+                .send(UpdateEvent::Source(SourceAction::Updated {
+                    source_id: "guard-check".to_string(),
+                    title: "Guard check".to_string(),
+                    text: body,
+                    fetched_at_unix: 1,
+                }))
+                .is_ok()
+        );
+        let _ = sender.send(UpdateEvent::Finished {
+            updated: 1,
+            unchanged: 0,
+            failed: 0,
+        });
+        drop(sender);
+
+        app.poll_list_updates();
+        assert!(!app.lists_updating());
+        assert_eq!(app.adblock.rule_count(), before + 1);
+        assert!(app.adblock.check_network_request(
+            "https://guard-check.example.test/pixel.js",
+            "https://site.test/",
+            craft_adblock::SCRIPT,
+        ));
+
+        // Nothing left over: a later pass has no pending actions to install.
+        app.poll_list_updates();
+        assert_eq!(app.adblock.rule_count(), before + 1);
+    }
 }
