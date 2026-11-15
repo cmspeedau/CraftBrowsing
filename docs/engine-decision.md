@@ -90,9 +90,11 @@ Neutral for now:
    content-rect compositing model (CEF uses native child surfaces, not a GL blit),
    input forwarding, and console/crash callbacks.
 4. Move the adblock network hook to the CEF request pipeline (resource
-   interception). On the Servo side the equivalent hook is
-   `WebViewDelegate::load_web_resource`; neither is wired today, so the shield
-   toggle currently blocks nothing (tracked in `docs/roadmap.md`).
+   interception). Done on the Servo side (2026-11-15):
+   `WebViewDelegate::load_web_resource` in `craft-ui::window` cancels matched
+   subresource loads and the decision half lives in `craft-adblock`, which has no
+   engine dependency, so the CEF port is the hook only. Neither backend applies
+   cosmetic rules yet. See `docs/tracking-protection.md`.
 5. Update the three packaging targets to bundle CEF.
 6. Keep the Servo `PageController` impl in-tree; it is what the re-evaluation
    flips back to.

@@ -74,14 +74,9 @@ To prevent single-compromise vulnerabilities and side-channel data exfiltration:
 * **Encrypted Client Hello (ECH):** Prevents network snoopers and ISPs from seeing the target Server Name Indication (SNI) during TLS handshakes. Toggleable in settings.
 
 ### 3.2. Native Tracking Protection & Content Filtering
-* **Filter Execution:** Sub-millisecond rule evaluation (`adblock-rust`) matching EasyList, EasyPrivacy, uBlock Origin filter rules, and URL parameter tracking strippers.
-  * *Status (2026-11-15):* the rule engine is in the build (`craft-adblock`) and the
-    address-bar shield toggle works, but no filter lists are loaded and nothing in
-    the request path calls the matcher, so no request is blocked yet. The hook
-    points are `WebViewDelegate::load_web_resource` on Servo and resource
-    interception on CEF. Do not describe tracking protection as active until that
-    wiring lands.
-  * *User Controls:* Quick address-bar shield toggle to disable blocking on trusted sites; custom filter list subscription manager (`craft://settings/shields`).
+* **Filter Execution:** Network requests are matched against the compiled ruleset in `adblock-rust`; matched subresource loads are cancelled by the engine's request hook (`WebViewDelegate::load_web_resource`), and top-level documents are never refused silently.
+  * *Status (2026-11-15):* active. The ruleset is the curated bundled list in `crates/craft-adblock/lists/default-network-filters.txt` (59 rules), not a downloaded EasyList; the shield reports rules loaded and requests refused this session. Element hiding is parsed but not delivered to the page, remote list subscriptions are not implemented, and the per-site exception API has no settings surface yet. See `docs/tracking-protection.md`.
+  * *User Controls:* Quick address-bar shield toggle to pause and resume blocking globally; custom filter list subscription manager (`craft://settings/shields`) is not built, so `craft://settings/*` currently fails to load.
 * **CNAME Uncloaking:** Resolves canonical DNS names internally prior to rule evaluation to catch trackers masquerading under first-party subdomains (toggleable).
 * **Referrer Trimming:** Cross-origin requests trim referrers strictly to the origin (`https://example.com/` instead of full URL path and search queries). Users can switch between "Strict Origin", "Origin on Cross-Origin", or "Full Referrer (Legacy)".
 

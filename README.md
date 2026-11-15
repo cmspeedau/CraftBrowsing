@@ -2,7 +2,7 @@
 
 A modern, privacy-focused web browser with native adblocking, multi-account container tabs, and a local-first sync engine. It is written in Rust, including the UI and every subsystem.
 
-CraftBrowsing is rendering on the [Servo](https://servo.org/) engine today. We have decided to adopt Blink/Chromium (via CEF) as the primary engine for broad real-world site compatibility, keeping the Rust chrome and all subsystems unchanged. See [docs/engine-decision.md](docs/engine-decision.md) for the rationale, the reversible engine-abstraction plan, and the scheduled re-evaluation of Servo. The engine swap is a planned phase; `craft-engine` still embeds Servo until that lands.
+CraftBrowsing renders on the [Servo](https://servo.org/) engine today. We have decided to adopt Blink/Chromium (via CEF) as the primary engine for broad real-world site compatibility, keeping the Rust chrome and all subsystems unchanged. See [docs/engine-decision.md](docs/engine-decision.md) for the rationale, the reversible engine-abstraction plan, and the scheduled re-evaluation of Servo. The engine swap is a planned phase; Servo is still the only backend that exists, reached through the `Engine` / `PageController` boundary in `craft-engine`.
 
 Feature set: native adblocking, multi-account container tabs, progressive web app (PWA) support, a built-in download manager, customizable UI theming, developer tools, hardware flashing access (WebSerial/WebUSB), vertical tabs & tab grouping, local RSS reader, encrypted portable vault backups, global media controls with PiP scrubber, and an optional, zero-knowledge local sync engine.
 
@@ -11,6 +11,11 @@ Feature set: native adblocking, multi-account container tabs, progressive web ap
 ## Security & Privacy: Mission Critical & User-Controlled
 
 In CraftBrowsing, security and privacy are not optional secondary features—they form the core foundation of every architectural boundary, **with granular user enable/disable control over every feature**:
+
+> This section is the design goal, not a feature list. What the running browser
+> enforces today, with the control that actually exists, is tracked per area:
+> [tracking protection status](docs/tracking-protection.md), and the roadmap's
+> integration status note (`docs/roadmap.md`) for what is still crate-level only.
 
 - **User Sovereignty & Granular Toggles (`craft://settings/privacy`):** Every single privacy protection (ad/tracker blocking, anti-fingerprinting, HTTPS-Only, DoH, containers, hardware device access) can be individually toggled on/off globally or overridden on a per-site / per-container basis.
 - **Zero-Telemetry & Local Defaults:** No phone-home diagnostics, metrics, or default network probes.
@@ -29,8 +34,8 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 
 - **Rust application layer, swappable engine:** Everything above the engine (UI, tabs, storage, adblock, sync, transfers) is Rust behind an engine abstraction. Servo runs it today; Blink/Chromium (CEF) is the adopted target for real-world site compatibility, with scheduled Servo re-evaluation ([docs/engine-decision.md](docs/engine-decision.md)).
 - **Cross-Platform Releases & Auto-Update:** Native builds for Windows (with silent background auto-updates), macOS (universal notarized `.dmg` with in-app updater), and Linux (**AppImage with `zsync` delta updates**).
-- **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline (with per-site shield toggle).
-- **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
+- **Native Ad & Tracker Blocking:** `adblock-rust` network matching enforced in the engine's request hook, with an address-bar shield toggle and a bundled curated ruleset. Per-site controls, downloaded lists and element hiding are pending (`docs/tracking-protection.md`).
+- **Inbuilt Containers:** Firefox-style contextual identities are bound to tabs and colored in the chrome, and `craft-storage` implements partitioned jars and origin storage. Engine-level isolation is not wired yet, so containers do not yet separate cookies or sessions (`docs/containers.md`).
 - **Tab Groups & Vertical Tabs:** Color-coded collapsible groups, container auto-binding, and idle memory hibernation (`docs/tabs-and-groups.md`).
 - **Global Media Hub & PiP Scrubber:** Central toolbar popup for background media playback with timeline scrubbers and mute toggles (`docs/media-hub.md`).
 - **Local RSS/Atom Feed Reader (`craft://feeds`):** In-browser feed subscription, full-text offline caching, zero cloud dependencies (`docs/rss-reader.md`).
@@ -64,6 +69,7 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 - [Plugin System & Extensions](docs/plugin-system.md)
 - [Passwords & External Manager Integration](docs/passwords.md)
 - [Web Compatibility Gaps (Servo engine)](docs/webcompat.md)
+- [Tracking Protection: What Runs Today](docs/tracking-protection.md)
 - [Engine Decision: Blink/Chromium (CEF), keep Servo re-evaluable](docs/engine-decision.md)
 - [Making Submissions Easy to Read](docs/making-submissions.md)
 

@@ -33,7 +33,7 @@ CraftBrowsing/
 | :--- | :--- | :--- |
 | **Rendering & DOM** | Servo / WebRender today; Blink/Chromium (CEF) planned | Current: Servo layout, HTML parsing, GPU rendering. A decision to move to Blink/CEF is accepted but not yet implemented; see `docs/engine-decision.md` and the `craft-engine` trait boundary |
 | **Browser Chrome (UI)** | [egui](https://github.com/emilk/egui) (0.34.3) + egui_glow | Immediate-mode GPU UI embedded in the winit/surfman loop; same version servoshell uses, so glyph rasterization stays on egui's own vello 0.0.6 and does not collide with servo-canvas's vello 0.2 multithreading |
-| **Ad-Blocking** | [`adblock-rust`](https://github.com/brave/adblock-rust) | Sub-millisecond URL filtering matching uBlock / Brave rulesets |
+| **Ad-Blocking** | [`adblock-rust`](https://github.com/brave/adblock-rust) | Network-rule matching enforced in the engine's web-resource hook (`WebViewDelegate::load_web_resource`); bundled curated ruleset, cosmetic rules parsed but not applied |
 | **Download Manager** | `craft-downloads` (`tokio::io`, `reqwest`) | Legacy HTTP downloads; being superseded by `craft-transfers` |
 | **Transfer Engine** | `craft-transfers` (`librqbit`, `reqwest`, `tokio`) | Segmented HTTP (4-part byte-range resume) + magnet/torrent downloads, container-aware, leech-by-default (v0.5.0) || **Hardware & Flashing** | `craft-hardware` (`serialport`, `rusb`, `hidapi-rs`) | Opt-in, zero-trust WebSerial, WebUSB, and WebHID device flashing & serial debugging |
 | **Progressive Web Apps** | `craft-pwa` | W3C manifest parsing, chromeless standalone windows, and OS desktop shortcuts |

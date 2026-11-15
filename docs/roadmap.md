@@ -12,8 +12,9 @@ CraftBrowsing is a next-generation, highly customizable web browser with a Rust 
 > entry says so.
 >
 > **Integration status (verified 2026-11-15).** The workspace builds one binary,
-> `craft-ui`, which depends on `craft-core`, `craft-engine`, `craft-adblock` (flag
-> and toggle only) and `craft-sync` (preferences only). `craft-storage` and
+> `craft-ui`, which depends on `craft-core`, `craft-engine`, `craft-adblock`
+> (network matcher, consulted per request by the engine's resource hook) and
+> `craft-sync` (preferences only). `craft-storage` and
 > `craft-transfers` are complete, tested crates that no binary links yet, so
 > history/bookmarks/permission persistence, private-browsing profiles, the
 > partitioned cookie jars, and the download manager are reachable through their
@@ -31,6 +32,14 @@ CraftBrowsing is a next-generation, highly customizable web browser with a Rust 
 > browsing (no profile selection in the shell). Each needs its wiring item before
 > the tick describes the product. The CI/release matrix item is real: three OS
 > targets with AppImage and `zsync` metadata.
+>
+> Also described in `README.md` and `docs/security-and-privacy.md` but with no
+> implementation anywhere in the workspace, checked by search on 2026-11-15:
+> anti-fingerprinting (canvas readback noise, WebGL blunting, AudioContext
+> jitter, user-agent normalization), HTTPS-Only upgrading and its interstitial,
+> DNS-over-HTTPS / DNS-over-TLS, Encrypted Client Hello, and per-container
+> protection overrides. Network tracking protection is the one control that now
+> genuinely runs (`docs/tracking-protection.md`).
 
 ## 3. Release Milestones & Phase Tracking
 
@@ -43,7 +52,10 @@ CraftBrowsing is a next-generation, highly customizable web browser with a Rust 
 - [x] Session restore engine and memory hibernation / tab discarding for inactive tabs.
 - [x] Local SQLite storage layer for bookmarks, history, tabs, and user-selected search engines (`craft-storage`).
 - [x] Ephemeral Private Browsing mode with memory-only SQLite (`:memory:`) and zero disk touches.
-- [ ] Integrate native adblocking (`adblock-rust`) directly into network request pipeline with per-site quick-toggle. (Not wired as of 2026-11-15: `craft-adblock` builds an `adblock-rust` engine and the chrome has the shield toggle, but no filter lists are ever added via `add_filter_rules` and `check_network_request` has no caller, so no request is blocked. Hook point on Servo is `WebViewDelegate::load_web_resource`; on CEF it is request interception. See `docs/engine-decision.md` step 3.)
+- [x] Route every page request through the native `adblock-rust` matcher, with the address-bar quick toggle. (Done 2026-11-15: Servo's `WebViewDelegate::load_web_resource` hook consults the matcher per subresource and cancels matched loads, top-level documents excepted. Verified on a live news page: 59 bundled rules compiled, 25 requests refused, page still rendered. See `docs/tracking-protection.md`.)
+- [ ] Load real filter lists from upstream (EasyList, EasyPrivacy, uBlock filters) with user-triggered updates and a local cache. (The shipped set is 59 curated endpoint rules in `crates/craft-adblock/lists/default-network-filters.txt`. An updater must stay explicit: fetching lists at startup would be a default network call, which the privacy invariants forbid.)
+- [ ] Apply cosmetic and element-hiding rules. (`adblock-rust` parses them into the engine; nothing delivers `get_cosmetic_styles` results to the page, so a `$elemhide` or `###selector` rule is inert.)
+- [ ] Per-site shield controls in the settings surface. (`add_site_exception` and `remove_site_exception` exist and are tested, and the matcher honors them, but the chrome only toggles protection globally because internal pages such as `craft://settings/shields` are not registered with the engine.)
 - [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning). (Partly built as of 2026-11-15: container identities with colors/icons exist in the chrome, `craft-storage` implements partitioned cookie jars, origin storage and cache keyed by `container_id` and purges with the container, but the browser does not use `craft-storage` and Servo runs with `temporary_storage: true` on a single shared `WebView`, so nothing is partitioned per container yet. Needs per-container page handles, which arrive with the per-tab surfaces of Phase 2b.)
 - [x] Container-aware tab model: each tab and engine record carries its `ContainerId`, and container-scoped new-tab actions in the chrome pass the real id (`craft-engine::TabRecord.container_id`).
 - [x] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
