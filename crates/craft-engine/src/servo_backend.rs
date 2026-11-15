@@ -1,25 +1,28 @@
-//! Servo backend for the engine boundary: a [`PageController`] over the live
-//! `servo::WebView`, plus the handle the window uses to publish that webview.
+//! Servo backend for the engine boundary: a [`PageController`] implementation
+//! over a live `servo::WebView`. Built only with the `servo` feature, so the
+//! default `craft-engine` stays free of engine and GPU dependencies.
 //!
-//! The page object is still created by `window.rs`, because building one needs
-//! the winit window, the surfman GL context and the offscreen rendering context
-//! the page paints into. That is the compositing half of the boundary, and it
-//! moves behind it only with screenshot verification (Phase 2b, see
-//! docs/engine-decision.md). Everything here is a control-plane operation on an
-//! already-existing page: navigation, history, load state and page identity.
+//! This module deliberately holds no windowing or GL code. The page object is
+//! created by the host (`craft-ui::window`), because building one needs the winit
+//! window, the surfman context and the offscreen surface the page paints into.
+//! That half of the boundary moves with Phase 2b (see docs/engine-decision.md)
+//! and needs screenshot verification. Everything here is a control-plane
+//! operation on a page that already exists: navigation, history, load state and
+//! page identity, read back out of the engine's own view of itself.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use craft_engine::{PageController, PageLoadState, PageSnapshot};
 use servo::{LoadStatus, WebView};
 use tracing::{info, warn};
 use url::Url;
 
-/// Handle the window uses to publish its live page to the controller.
+use crate::{PageController, PageLoadState, PageSnapshot};
+
+/// Handle the host uses to publish its live page to the controller.
 ///
 /// UI-thread only by design: `servo::WebView` is an `Rc` and is not `Send`, so
-/// this must not become a cross-thread registry. The window clears it before
+/// this must not become a cross-thread registry. The host clears it before
 /// Servo/GL teardown so the controller can never reach a freed page.
 #[derive(Clone, Default)]
 pub struct PageSlot {
@@ -123,5 +126,41 @@ fn map_load_status(status: LoadStatus) -> PageLoadState {
         LoadStatus::HeadParsed => PageLoadState::Loading,
         LoadStatus::Complete => PageLoadState::Completed,
         LoadStatus::Stopped => PageLoadState::Stopped,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_load_status;
+    use crate::PageLoadState;
+    use servo::LoadStatus;
+
+    /// The chrome's stop/reload button and its load progress depend entirely on
+    /// this mapping, so each engine state must land on its own control-plane
+    /// state. Two states collapsing together is how a UI ends up saying
+    /// "loading" forever.
+    #[test]
+    fn every_load_status_maps_to_a_distinct_state() {
+        let mapped = [
+            map_load_status(LoadStatus::Started),
+            map_load_status(LoadStatus::HeadParsed),
+            map_load_status(LoadStatus::Complete),
+            map_load_status(LoadStatus::Stopped),
+        ];
+        let expected = [
+            PageLoadState::Started,
+            PageLoadState::Loading,
+            PageLoadState::Completed,
+            PageLoadState::Stopped,
+        ];
+        assert_eq!(mapped, expected);
+
+        for (i, a) in mapped.iter().enumerate() {
+            for (j, b) in mapped.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "engine states {i} and {j} collapsed");
+                }
+            }
+        }
     }
 }

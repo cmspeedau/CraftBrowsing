@@ -1,7 +1,6 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
 pub mod omnibox;
-pub mod page;
 pub mod tab_manager;
 pub mod window;
 
@@ -9,13 +8,12 @@ use craft_adblock::AdblockManager;
 use craft_core::container::{Container, ContainerId};
 use craft_core::media::{MediaAction, MediaHub, MediaSessionEvent, MediaSessionId};
 use craft_core::tab::{Tab, TabGroup, TabId};
-use craft_engine::{Backend, Engine, EngineEvent, TabEngine};
+use craft_engine::{Backend, Engine, EngineEvent, PageSlot, ServoPageController, TabEngine};
 use craft_sync::protocol::SyncPreferences;
 use std::sync::Arc;
 use tracing::info;
 
 pub use omnibox::{OmniboxState, OmniboxTarget};
-pub use page::{PageSlot, ServoPageController};
 pub use tab_manager::{TabNode, TabState, VerticalTabManager};
 pub use window::{BrowserWindowApp, run_window_event_loop};
 
@@ -27,7 +25,7 @@ pub struct BrowserApp {
     pub groups: Vec<TabGroup>,
     pub containers: Vec<Container>,
     /// The engine boundary. The chrome holds a trait object so nothing here
-    /// names Servo; the backend-specific page handle lives in `craft_ui::page`.
+    /// names Servo; the backend page handle lives in `craft_engine::servo_backend`.
     pub engine: Box<dyn Engine>,
     /// Published to by `window.rs` once it has built the real page.
     page_slot: PageSlot,

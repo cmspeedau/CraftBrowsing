@@ -16,6 +16,8 @@ pub mod compositor;
 pub mod engine;
 pub mod events;
 pub mod pipeline;
+#[cfg(feature = "servo")]
+pub mod servo_backend;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -25,6 +27,8 @@ use tracing::info;
 
 pub use engine::{Backend, Engine, PageController, PageSnapshot};
 pub use events::{EngineEvent, NavigationEvent, PageLoadState};
+#[cfg(feature = "servo")]
+pub use servo_backend::{PageSlot, ServoPageController};
 
 /// A tab as the control plane sees it: its container partition and the last page
 /// state the backend reported for it.

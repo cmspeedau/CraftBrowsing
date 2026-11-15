@@ -3,6 +3,15 @@ name = "craft-engine"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+# Builds the Servo backend (`servo_backend`), which pulls the engine and its GPU
+# stack into the graph. Without it the crate is the boundary and the control
+# plane only, so tooling and tests stay light.
+servo = ["dep:servo", "dep:url"]
+
 [dependencies]
 craft-core = { path = "../craft-core" }
 tracing = { workspace = true }
+servo = { workspace = true, optional = true }
+url = { workspace = true, optional = true }

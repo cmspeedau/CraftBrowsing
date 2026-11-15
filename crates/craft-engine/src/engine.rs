@@ -9,16 +9,18 @@
 //!   backend-agnostic tab records and the event stream. The chrome holds it as
 //!   `Box<dyn Engine>`.
 //! - [`PageController`] is implemented by a backend's page handle. For Servo that
-//!   is `craft_ui::page::ServoPageController` over a `servo::WebView`; a Blink
-//!   backend implements the same trait over a CEF browser.
+//!   is the feature-gated `crate::servo_backend::ServoPageController` over a
+//!   `servo::WebView`; a Blink backend implements the same trait over a CEF
+//!   browser.
 //!
-//! This split exists because page painting and compositing are still owned by
-//! `craft-ui::window`: they are coupled to the winit window, the egui/surfman GL
-//! context and the content-rect blit. Lifting them behind this boundary is
-//! Phase 2b and must be verified with real screenshots (a blank-but-loaded page
-//! is indistinguishable from a correct one in logs), so it is deferred rather
-//! than done blind. Until then [`PageController`] addresses the one live page,
-//! and per-tab rendering contexts are created by the host, not by this crate.
+//! This split exists because page painting and compositing are still owned by the
+//! host (`craft-ui::window`): they are coupled to the winit window, the
+//! egui/surfman GL context and the content-rect blit. Lifting them behind this
+//! boundary is Phase 2b and must be verified with real screenshots (a
+//! blank-but-loaded page is indistinguishable from a correct one in logs), so it
+//! is deferred rather than done blind. Until then [`PageController`] addresses the
+//! one live page, and per-tab rendering contexts are created by the host, not by
+//! this crate.
 
 use craft_core::container::ContainerId;
 use craft_core::tab::TabId;
