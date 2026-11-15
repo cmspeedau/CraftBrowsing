@@ -1,0 +1,95 @@
+name: Servo Watch
+
+# Lightweight monitor: reports the latest servo/servo release and the open/closed
+# state of the tracked web-compat gaps, and flags a re-evaluation only when that
+# set changes since the last run. It does NOT build or run the engine; the heavy
+# `tools/upstream-servo-check` re-evaluation is a human-triggered step.
+# See docs/engine-decision.md.
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"       # monthly, at the release-boundary review window
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write               # to open/comment the re-evaluation tracking issue
+
+env:
+  REPO: servo/servo
+  TRACKED_ISSUES: "35767 49396 39785"   # IntersectionObserver, YouTube h2, Gemini h2
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gather upstream state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api -X GET "repos/$REPO/releases" --paginate \
+            --jq '.[0].tag_name // empty' 2>/dev/null || true)
+          [ -z "$latest" ] && latest=$(gh api -X GET "repos/$REPO/tags" \
+            --jq '.[0].name // empty')
+          summary="latest_release=$latest"
+          for n in $TRACKED_ISSUES; do
+            st=$(gh api "repos/$REPO/issues/$n" --jq '.state' 2>/dev/null || echo unknown)
+            summary="$summary
+          issue_${n}=$st"
+            printf '%s' "issue_${n}=$st " >> "$GITHUB_ENV"
+          done
+          # Signature: release + issue states. A change flips the cache key.
+          sig=$(printf '%s' "$summary" | tr -d ' \n' | md5sum | cut -d' ' -f1)
+          echo "latest=$latest"        >> "$GITHUB_OUTPUT"
+          echo "signature=$sig"        >> "$GITHUB_OUTPUT"
+          {
+            echo "### Servo upstream watch"
+            echo "- latest release: ${latest:-unknown}"
+            echo "- #35767 IntersectionObserver: ${issue_35767:-?}"
+            echo "- #49396 YouTube h2: ${issue_49396:-?}"
+            echo "- #39785 Gemini h2: ${issue_39785:-?}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Detect change since last run
+        id: change
+        uses: actions/cache@v4
+        with:
+          path: .servo-watch-state
+          # Unique key per observed state; a hit means nothing changed.
+          key: servo-watch-${{ steps.state.outputs.signature }}
+
+      - name: Flag re-evaluation when state changed
+        if: steps.change.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.state.outputs.latest }}
+        run: |
+          set -euo pipefail
+          mkdir -p .servo-watch-state
+          echo "$LATEST" > .servo-watch-state/latest   # persisted by the cache step
+          TITLE="Servo re-evaluation: engine gaps may have changed"
+          BODY="Automated watch detected a change in servo/servo state (latest release \`$LATEST\`, or an intersection-observer / HTTP2 issue state changed since the last check).
+
+          Next step is a human decision, not an automatic switch:
+          1. Build Servo main in the container and re-run the checks:
+             \`./tools/upstream-servo-check/run.sh\`
+          2. Read \`tools/upstream-servo-check/out/\` for the IO and h2 results.
+          3. If the gaps relevant to us are closed, revisit \`docs/engine-decision.md\`
+             and consider re-enabling the \`ServoEngine\` backend behind the Engine trait.
+
+          Per Servo's AI-usage policy, any upstream issue/PR text must be written and
+          validated by a human; this job only surfaces the signal."
+          # Update the single tracking issue if open, else create one.
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "in:title $TITLE" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi
+
+      - name: No-change note
+        if: steps.change.outputs.cache-hit == 'true'
+        run: echo "No change since last recorded state." >> "$GITHUB_STEP_SUMMARY"
