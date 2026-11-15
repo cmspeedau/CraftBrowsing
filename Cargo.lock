@@ -1216,6 +1216,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -1306,6 +1307,7 @@ dependencies = [
  "egui_glow",
  "euclid",
  "glow",
+ "http",
  "reqwest",
  "rustls",
  "serde",

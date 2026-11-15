@@ -134,6 +134,16 @@ impl RuleGroup {
     }
 }
 
+/// What a group looks like to the chrome, without its rule bodies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupSummary {
+    pub id: String,
+    pub title: String,
+    pub accepted: usize,
+    pub rejected: usize,
+    pub updated_unix: Option<i64>,
+}
+
 pub struct AdblockManager {
     /// Every group compiled into `engine`, in load order. Kept because
     /// `adblock-rust` engines are immutable once built, so any change has to
@@ -269,8 +279,23 @@ impl AdblockManager {
     }
 
     /// The loaded groups, in load order, for display.
-    pub fn groups(&self) -> Vec<RuleGroup> {
-        self.groups.read().unwrap().clone()
+    ///
+    /// Deliberately not the `RuleGroup`s themselves: those hold the whole list
+    /// body (the upstream lists are megabytes), and this is called while the menu
+    /// is open, which means once per frame.
+    pub fn group_summaries(&self) -> Vec<GroupSummary> {
+        self.groups
+            .read()
+            .unwrap()
+            .iter()
+            .map(|group| GroupSummary {
+                id: group.id.clone(),
+                title: group.title.clone(),
+                accepted: group.accepted,
+                rejected: group.rejected,
+                updated_unix: group.updated_unix,
+            })
+            .collect()
     }
 
     /// Total compiled rules across all groups.
@@ -290,22 +315,37 @@ impl AdblockManager {
     /// the coarse per-site opt-out the shield toggle uses; it is not a rule-level
     /// exception, it suspends matching for that page entirely.
     pub fn add_site_exception(&self, domain_or_host: &str) {
+        let Some(normalized) = normalize_exception(domain_or_host) else {
+            debug!("shields: ignored an empty site exception");
+            return;
+        };
         let mut exceptions = self.site_exceptions.write().unwrap();
-        let needle = domain_or_host.to_string();
-        if !exceptions.contains(&needle) {
-            exceptions.push(needle);
+        if !exceptions.contains(&normalized) {
+            exceptions.push(normalized);
         }
     }
 
     pub fn remove_site_exception(&self, domain_or_host: &str) {
+        let Some(normalized) = normalize_exception(domain_or_host) else {
+            return;
+        };
         self.site_exceptions
             .write()
             .unwrap()
-            .retain(|entry| entry != domain_or_host);
+            .retain(|entry| entry != &normalized);
     }
 
     pub fn site_exceptions(&self) -> Vec<String> {
         self.site_exceptions.read().unwrap().clone()
+    }
+
+    /// Is protection already paused for this host (or a domain above it)?
+    pub fn is_site_exempted(&self, host: &str) -> bool {
+        self.site_exceptions
+            .read()
+            .unwrap()
+            .iter()
+            .any(|exception| host_is_exempted_by(host, exception))
     }
 
     /// Should this request be blocked?
@@ -320,7 +360,10 @@ impl AdblockManager {
         }
 
         let exceptions = self.site_exceptions.read().unwrap();
-        if exceptions.iter().any(|domain| source_url.contains(domain)) {
+        if exceptions
+            .iter()
+            .any(|domain| exception_covers(domain, source_url))
+        {
             return false;
         }
 
@@ -426,6 +469,51 @@ fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or_default()
+}
+
+/// Does `exception` (a host or domain the user paused protection for) cover the
+/// page at `page_url`?
+///
+/// Host equality or subdomain suffix, nothing looser. The previous check was
+/// `source_url.contains(domain)` over the whole URL, which meant an exception for
+/// `example.com` also silenced protection on `notexample.com`, on any URL that
+/// merely mentioned the string in its path or query, and on the subresource
+/// request itself rather than only its page.
+pub fn exception_covers(exception: &str, page_url: &str) -> bool {
+    url_host(page_url).is_some_and(|host| host_is_exempted_by(&host, exception))
+}
+
+/// Is this bare `host` covered by `exception`? The same rule as
+/// [`exception_covers`], for callers that already hold a host (the chrome wants
+/// to ask "is this site paused?" without inventing a URL).
+pub fn host_is_exempted_by(host: &str, exception: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    let needle = exception.trim_start_matches('.').to_ascii_lowercase();
+    if needle.is_empty() {
+        return false;
+    }
+    host == needle || host.ends_with(&format!(".{needle}"))
+}
+
+/// Store an exception the way matching will compare it: lowercase, no leading
+/// dot, no scheme or path. Without this, pausing `Example.COM` could never be
+/// resumed by asking about `example.com`, because removal compared raw strings
+/// while matching did not.
+fn normalize_exception(domain_or_host: &str) -> Option<String> {
+    let trimmed = domain_or_host
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn url_host(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    Some(parsed.host_str()?.to_ascii_lowercase())
 }
 
 fn report_for(counts: &HashMap<String, (usize, usize)>, id: &str) -> RuleLoadReport {
@@ -589,7 +677,7 @@ mod tests {
             ]
         );
         assert_eq!(manager.rule_count(), 2);
-        let groups = manager.groups();
+        let groups = manager.group_summaries();
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].title, "EasyList");
         assert_eq!(groups[1].updated_unix, Some(11));
@@ -701,6 +789,91 @@ mod tests {
             "https://site.test/",
             IMAGE,
         ));
+    }
+
+    /// A paused site must not silence protection anywhere near it. The previous
+    /// substring test did exactly that.
+    #[test]
+    fn a_site_exception_covers_only_that_host_and_its_subdomains() {
+        // Built on `new()` rather than `empty()`: these assertions are about
+        // requests still being blocked, which needs rules to block them with.
+        let manager = AdblockManager::new();
+        manager.add_site_exception("example.com");
+        let tracker = "https://www.google-analytics.com/analytics.js";
+        assert!(
+            manager.check_network_request(tracker, "https://innocent.test/", SCRIPT),
+            "the fixture itself must be blocking on the bundled rules"
+        );
+
+        assert!(
+            !manager.check_network_request(tracker, "https://example.com/", SCRIPT),
+            "the paused site itself"
+        );
+        assert!(
+            !manager.check_network_request(tracker, "https://shop.example.com/cart", SCRIPT),
+            "a subdomain of the paused site"
+        );
+        assert!(
+            manager.check_network_request(tracker, "https://notexample.com/", SCRIPT),
+            "a different host that merely contains the string"
+        );
+        assert!(
+            manager.check_network_request(tracker, "https://evil.test/?ref=example.com", SCRIPT),
+            "a different host that mentions the string in its query"
+        );
+        assert!(
+            manager.check_network_request(tracker, "https://example.com.evil.test/", SCRIPT),
+            "a look-alike suffix must not match"
+        );
+        assert!(
+            manager.check_network_request(tracker, "", SCRIPT),
+            "no page URL means no exception can apply"
+        );
+    }
+
+    #[test]
+    fn the_manager_can_answer_whether_a_host_is_paused() {
+        let manager = AdblockManager::empty();
+        assert!(!manager.is_site_exempted("example.com"));
+        manager.add_site_exception("Example.COM");
+        assert!(manager.is_site_exempted("example.com"));
+        assert!(manager.is_site_exempted("shop.example.com"));
+        assert!(!manager.is_site_exempted("notexample.com"));
+        assert!(!manager.is_site_exempted("example.com.evil.test"));
+        assert!(!manager.is_site_exempted(""));
+        // Removal has to agree with matching about case and the leading dot,
+        // otherwise a paused site can never be un-paused.
+        manager.remove_site_exception("example.com");
+        assert!(!manager.is_site_exempted("example.com"));
+        manager.add_site_exception(".Bank.Example");
+        assert_eq!(manager.site_exceptions(), vec!["bank.example".to_string()]);
+        manager.remove_site_exception("bank.example");
+        assert!(manager.site_exceptions().is_empty());
+    }
+
+    #[test]
+    fn exception_matching_is_case_insensitive_and_tolerates_a_leading_dot() {
+        assert!(exception_covers(
+            "Example.COM",
+            "https://shop.example.com/x"
+        ));
+        assert!(exception_covers(".example.com", "https://example.com/"));
+        assert!(!exception_covers("", "https://example.com/"));
+        assert!(!exception_covers("example.com", "not a url"));
+    }
+
+    #[test]
+    fn group_summaries_report_counts_without_rule_bodies() {
+        let manager = AdblockManager::new();
+        let summaries = manager.group_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, BUNDLED_GROUP);
+        assert!(summaries[0].accepted > 20);
+        assert_eq!(summaries[0].rejected, 0);
+        assert_eq!(
+            summaries[0].updated_unix, None,
+            "bundled rules never go stale"
+        );
     }
 
     #[test]

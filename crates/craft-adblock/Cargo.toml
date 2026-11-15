@@ -8,6 +8,7 @@ adblock = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
 # Declared only to pin the version `adblock`'s `rmp-serde` resolves against
 # (0.8.14; newer rmp removed functions rmp-serde 0.15 still calls, which breaks
 # the build). No code here uses `rmp` directly, and cargo will say so: do not

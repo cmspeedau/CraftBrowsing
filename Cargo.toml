@@ -30,6 +30,8 @@ winit = "0.30"
 servo = "0.8.0"
 euclid = "0.22"
 url = "2.5"
+# Header and status types the engine's protocol-handler interface speaks in.
+http = "1"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
 egui = "0.34.3"
 egui-winit = { version = "0.34.3", default-features = false }

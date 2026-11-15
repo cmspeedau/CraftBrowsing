@@ -357,7 +357,7 @@ impl BrowserApp {
     /// The loaded rule groups (bundled rules plus any cached lists), for display.
     pub fn filter_list_status(&self) -> Vec<String> {
         self.adblock
-            .groups()
+            .group_summaries()
             .iter()
             .map(|group| {
                 format!(
@@ -771,7 +771,7 @@ mod tests {
             "https://site.test/",
             craft_adblock::SCRIPT,
         ));
-        let status = adblock.groups();
+        let status = adblock.group_summaries();
         assert_eq!(status.len(), 2, "bundled plus the cached list");
         assert_eq!(status[1].title, source.title);
 
@@ -792,7 +792,7 @@ mod tests {
         let before = adblock.rule_count();
         install_cached_lists(&adblock, &store);
         assert_eq!(adblock.rule_count(), before);
-        assert_eq!(adblock.groups().len(), 1);
+        assert_eq!(adblock.group_summaries().len(), 1);
         std::fs::remove_dir_all(&dir).ok();
     }
 
