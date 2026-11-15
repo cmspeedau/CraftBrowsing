@@ -15,7 +15,7 @@ Load the matching skill with the `skill` tool before starting the work, not afte
 | Work area | Load these skills |
 | --- | --- |
 | Any Rust change | `rust` |
-| Servo embedding, rendering contexts, winit event loop, delegates, content processes (`craft-engine`) | `servo-engine-integration` (plus `rust`) |
+| Servo embedding, rendering contexts, winit event loop, delegates, content processes (`craft-engine` incl. `servo_backend`, and `craft-ui/src/window.rs` which owns the window, GL contexts and page paint) | `servo-engine-integration` (plus `rust`) |
 | Engine abstraction boundary, Blink/Chromium (CEF) backend, packaging, and the scheduled Servo re-evaluation (`craft-engine`, `.github/workflows/servo-watch.yml`) | `rust`, `docker`, `github-actions`; read `docs/engine-decision.md` first; the engine swap needs a separate explicit go |
 | Tests, benchmarks, proptest, coverage | `rust-testing` |
 | Browser chrome, settings pages, dialogs, themes, any visual surface in `craft-ui` | `antislop` first, then `antislop-ui`, `antislop-human`, `antislop-layoutmobile`, `antislop-copywriting`, `antislop-code` |
@@ -44,7 +44,7 @@ Load the matching skill with the `skill` tool before starting the work, not afte
 | Crate | Purpose |
 | --- | --- |
 | `craft-core` | Shared types: tabs and groups, containers, downloads, permissions |
-| `craft-engine` | Engine abstraction boundary: embeds Servo today, request pipeline, compositor and events. The Blink/CEF backend and the trait boundary are the planned next phase |
+| `craft-engine` | Engine abstraction boundary and control plane: the `Engine` / `PageController` traits, `TabEngine` tab records and the event stream, plus the feature-gated Servo page backend (`servo_backend`, enabled with `--features servo`). Window creation, the GL context and page painting stay in `craft-ui::window` until Phase 2b. The Blink/CEF backend is planned |
 | `craft-ui` | Browser chrome: window, omnibox, tab manager, settings surface |
 | `craft-storage` | SQLite layer: containers, downloads, permissions, privacy settings |
 | `craft-adblock` | Filter-list parsing and request matching |

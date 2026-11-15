@@ -10,7 +10,7 @@ CraftBrowsing is structured as a modular Cargo workspace separating browser chro
 CraftBrowsing/
 ├── crates/
 │   ├── craft-app/           # Main entry point & window management (Iced / Slint)
-│   ├── craft-engine/         # Servo engine embedding & WebRender bindings
+│   ├── craft-engine/         # Engine boundary + control plane; Servo page backend behind the `servo` feature
 │   ├── craft-adblock/        # Adblock rule engine (brave/adblock crate)
 │   ├── craft-downloads/      # Legacy HTTP download manager (being superseded by craft-transfers)
 │   ├── craft-transfers/      # Unified transfer engine: segmented HTTP + magnet/torrent (v0.5.0)

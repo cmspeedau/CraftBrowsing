@@ -1,8 +1,9 @@
 # Engine Decision: Adopt Blink/Chromium (CEF), Keep Servo Re-evaluable
 
-Status: Accepted (direction). Not yet implemented. `craft-engine` still embeds
-Servo today. The swap and the `Engine` trait boundary are a planned phase that
-needs a separate go before code changes.
+Status: Accepted (direction). The `Engine` / `PageController` boundary is in
+place and the chrome depends on it, but the rendering engine is still Servo. The
+CEF backend, the per-tab surfaces, and packaging are not started, and each needs a
+separate go.
 
 Date: 2026-11-15
 Deciders: project owner
@@ -65,18 +66,36 @@ Neutral for now:
 - Memory-safety and sandboxing claims are reworded: subsystems are Rust, rendering
   runs in the engine's sandboxed process.
 
-## Implementation plan (not started; needs a separate go)
+## Implementation plan
 
-1. Define the `Engine` trait in `craft-engine` (session, tab, navigation, events)
-   and move the current Servo embed behind a `ServoEngine` impl, with the egui
-   chrome depending only on the trait. This is the reversible foundation and keeps
-   today's working build.
-2. Add a `CefEngine` impl behind a feature flag; port tab/page lifecycle, the
+1. Done (2026-11-15). Define the engine boundary in `craft-engine` and stop the
+   chrome depending on a concrete engine. Shape as built: `Engine` (tab records,
+   navigation, events, page snapshots) is held by `craft-ui` as `Box<dyn Engine>`;
+   page operations go through a second trait, `PageController`, implemented by a
+   backend's page handle (`craft_engine::servo_backend::ServoPageController`,
+   behind a `servo` feature, over `servo::WebView`). The simulated `ServoEngine`
+   worker thread and its fabricated `Completed`/200 events are deleted. The engine
+   and GPU stack reach `craft-engine` only through that feature: the default build
+   and the control-plane tests are boundary-only, and the window, surfman contexts
+   and page paint stay in `craft-ui::window` until Phase 2b.
+2. Phase 2a done (2026-11-15): page truth has one source. URL, title, load state
+   and history availability come from `PageSnapshot`; the duplicate `PageState`
+   mutex in the chrome is gone, and the address bar follows the page's real URL.
+   Phase 2b, not started: move page creation and painting/compositing behind the
+   boundary and give each tab its own rendering context (per-tab and per-container
+   isolation depends on this). This part relocates the surfman/GL blit and must be
+   verified with screenshots, not logs: a blank-but-loaded page looks identical to
+   a correct one in the log.
+3. Add a `CefEngine` impl behind a feature flag; port tab/page lifecycle, the
    content-rect compositing model (CEF uses native child surfaces, not a GL blit),
    input forwarding, and console/crash callbacks.
-3. Move the adblock network hook to the CEF request pipeline (resource interception).
-4. Update the three packaging targets to bundle CEF.
-5. Keep the `ServoEngine` impl in-tree; it is what the re-evaluation flips back to.
+4. Move the adblock network hook to the CEF request pipeline (resource
+   interception). On the Servo side the equivalent hook is
+   `WebViewDelegate::load_web_resource`; neither is wired today, so the shield
+   toggle currently blocks nothing (tracked in `docs/roadmap.md`).
+5. Update the three packaging targets to bundle CEF.
+6. Keep the Servo `PageController` impl in-tree; it is what the re-evaluation
+   flips back to.
 
 ## Re-evaluation
 

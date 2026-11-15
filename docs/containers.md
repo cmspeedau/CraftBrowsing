@@ -2,6 +2,16 @@
 
 CraftBrowsing features native, built-in container tabs—similar to Firefox Multi-Account Containers—allowing users to isolate web storage, cookies, caches, and sessions while keeping container definitions, rules, and container-assigned tabs synchronized across devices.
 
+> **Status (2026-11-15).** Designed and partly built. Container identities and
+> per-tab container binding are live in the chrome, and `craft-storage` implements
+> partitioned cookie jars, origin storage and cache keyed by `container_id`, with
+> purge-on-delete. They are not enforced by the running browser yet: it builds one
+> shared `servo::WebView` and runs Servo with `temporary_storage: true`, and it
+> does not open `craft-storage` at all, so no two tabs are actually isolated from
+> each other. Per-container page handles depend on the per-tab rendering surfaces
+> (Phase 2b, `docs/engine-decision.md`). Until then, treat container isolation as
+> unimplemented rather than on-by-default.
+
 ---
 
 ## Core Isolation Guarantees

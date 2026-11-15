@@ -75,6 +75,12 @@ To prevent single-compromise vulnerabilities and side-channel data exfiltration:
 
 ### 3.2. Native Tracking Protection & Content Filtering
 * **Filter Execution:** Sub-millisecond rule evaluation (`adblock-rust`) matching EasyList, EasyPrivacy, uBlock Origin filter rules, and URL parameter tracking strippers.
+  * *Status (2026-11-15):* the rule engine is in the build (`craft-adblock`) and the
+    address-bar shield toggle works, but no filter lists are loaded and nothing in
+    the request path calls the matcher, so no request is blocked yet. The hook
+    points are `WebViewDelegate::load_web_resource` on Servo and resource
+    interception on CEF. Do not describe tracking protection as active until that
+    wiring lands.
   * *User Controls:* Quick address-bar shield toggle to disable blocking on trusted sites; custom filter list subscription manager (`craft://settings/shields`).
 * **CNAME Uncloaking:** Resolves canonical DNS names internally prior to rule evaluation to catch trackers masquerading under first-party subdomains (toggleable).
 * **Referrer Trimming:** Cross-origin requests trim referrers strictly to the origin (`https://example.com/` instead of full URL path and search queries). Users can switch between "Strict Origin", "Origin on Cross-Origin", or "Full Referrer (Legacy)".
