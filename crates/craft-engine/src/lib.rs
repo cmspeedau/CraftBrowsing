@@ -1,6 +1,7 @@
 //! Servo rendering engine integration and lifecycle manager for CraftBrowsing.
 
 pub mod compositor;
+pub mod engine;
 pub mod events;
 pub mod pipeline;
 
@@ -13,6 +14,7 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 pub use compositor::CompositorSurface;
+pub use engine::{Backend, Engine, PageSnapshot};
 pub use events::{EngineEvent, NavigationEvent, PageLoadState};
 
 /// Represents an individual Servo browsing context tied to a Tab and Container.
@@ -27,6 +29,7 @@ pub struct EngineContext {
     pub can_go_forward: bool,
     pub viewport_width: u32,
     pub viewport_height: u32,
+    pub hidpi_scale_factor: f32,
 }
 
 impl EngineContext {
@@ -41,6 +44,7 @@ impl EngineContext {
             can_go_forward: false,
             viewport_width: 1280,
             viewport_height: 720,
+            hidpi_scale_factor: 1.0,
         }
     }
 }
@@ -77,6 +81,13 @@ pub enum EngineCommand {
         tab_id: TabId,
         width: u32,
         height: u32,
+    },
+    SetHidpiScaleFactor {
+        tab_id: TabId,
+        scale: f32,
+    },
+    ActivateTab {
+        tab_id: TabId,
     },
     ExecuteScript {
         tab_id: TabId,
@@ -160,6 +171,12 @@ impl ServoEngine {
                                 tab_id, width, height
                             );
                         }
+                        EngineCommand::SetHidpiScaleFactor { tab_id, scale } => {
+                            info!("Engine: tab {:?} hidpi scale {}", tab_id, scale);
+                        }
+                        EngineCommand::ActivateTab { tab_id } => {
+                            info!("Engine: activate tab {:?}", tab_id);
+                        }
                         EngineCommand::Reload {
                             tab_id,
                             bypass_cache,
@@ -232,5 +249,94 @@ impl ServoEngine {
             events.push(event);
         }
         events
+    }
+}
+
+impl Engine for ServoEngine {
+    fn backend(&self) -> Backend {
+        Backend::Servo
+    }
+
+    fn create_tab(&mut self, tab_id: &TabId, container_id: &ContainerId, url: &str) {
+        self.create_context(tab_id.clone(), container_id.clone(), url);
+    }
+
+    fn close_tab(&mut self, tab_id: &TabId) {
+        self.contexts.remove(tab_id);
+        let _ = self.cmd_sender.send(EngineCommand::DestroyContext {
+            tab_id: tab_id.clone(),
+        });
+    }
+
+    fn navigate(&mut self, tab_id: &TabId, url: &str) {
+        ServoEngine::navigate(self, tab_id, url);
+    }
+
+    fn reload(&mut self, tab_id: &TabId, bypass_cache: bool) {
+        let _ = self.cmd_sender.send(EngineCommand::Reload {
+            tab_id: tab_id.clone(),
+            bypass_cache,
+        });
+    }
+
+    fn stop(&mut self, tab_id: &TabId) {
+        let _ = self.cmd_sender.send(EngineCommand::Stop {
+            tab_id: tab_id.clone(),
+        });
+    }
+
+    fn go_back(&mut self, tab_id: &TabId) {
+        let _ = self.cmd_sender.send(EngineCommand::GoBack {
+            tab_id: tab_id.clone(),
+        });
+    }
+
+    fn go_forward(&mut self, tab_id: &TabId) {
+        let _ = self.cmd_sender.send(EngineCommand::GoForward {
+            tab_id: tab_id.clone(),
+        });
+    }
+
+    fn resize(&mut self, tab_id: &TabId, width: u32, height: u32) {
+        if let Some(ctx) = self.contexts.get_mut(tab_id) {
+            ctx.viewport_width = width;
+            ctx.viewport_height = height;
+        }
+        let _ = self.cmd_sender.send(EngineCommand::ResizeViewport {
+            tab_id: tab_id.clone(),
+            width,
+            height,
+        });
+    }
+
+    fn set_hidpi_scale_factor(&mut self, tab_id: &TabId, scale: f32) {
+        if let Some(ctx) = self.contexts.get_mut(tab_id) {
+            ctx.hidpi_scale_factor = scale;
+        }
+        let _ = self.cmd_sender.send(EngineCommand::SetHidpiScaleFactor {
+            tab_id: tab_id.clone(),
+            scale,
+        });
+    }
+
+    fn set_active_tab(&mut self, tab_id: &TabId) {
+        let _ = self.cmd_sender.send(EngineCommand::ActivateTab {
+            tab_id: tab_id.clone(),
+        });
+    }
+
+    fn poll_events(&mut self) -> Vec<EngineEvent> {
+        ServoEngine::poll_events(self)
+    }
+
+    fn page_snapshot(&self, tab_id: &TabId) -> Option<PageSnapshot> {
+        let ctx = self.contexts.get(tab_id)?;
+        Some(PageSnapshot {
+            url: ctx.current_url.clone(),
+            title: ctx.title.clone(),
+            load_state: ctx.load_state.clone(),
+            can_go_back: ctx.can_go_back,
+            can_go_forward: ctx.can_go_forward,
+        })
     }
 }
