@@ -7,14 +7,18 @@ AI-authored issue/PR text, but allows AI-assisted bug *finding* only if a human
 reproduces and validates the result before filing. Concretely:
 - The container verification below is the human validation step: it reproduces
   the gaps against Servo `main` so findings are confirmed, not trusted from a tool.
-- The files under `issues/` are INTERNAL evidence/repro notes only. Do NOT paste
-  them into servo/servo. Any upstream report must be written by a person in their
-  own words from reproduced findings.
+- We have abandoned drafting upstream reports (the AI-authored issue text this
+  folder once held). The validated findings live in `docs/webcompat.md` and the
+  archived `out/` summaries. If anyone does file upstream later, a person writes it
+  in their own words from reproduced findings, never from tool output.
+- Because we are not filing, the outcome here feeds `docs/engine-decision.md`
+  (switch the primary engine) rather than a pull request.
 
 Builds Servo's current `main` in an isolated container and tests the exact URLs
 that fail on our pinned Servo 0.8.0. Purpose: decide whether our engine bugs
 (HTTP/2 navigation `PROTOCOL_ERROR`; `IntersectionObserver` not exposed) are
-already fixed upstream, and capture authoritative evidence for upstream issues.
+already fixed upstream, and capture authoritative evidence that feeds
+`docs/webcompat.md` and `docs/engine-decision.md`.
 
 This is a development/verification tool. It does not ship and does not touch the
 CraftBrowsing build graph.
