@@ -1,6 +1,7 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
 pub mod omnibox;
+pub mod page;
 pub mod tab_manager;
 pub mod window;
 
@@ -8,13 +9,13 @@ use craft_adblock::AdblockManager;
 use craft_core::container::{Container, ContainerId};
 use craft_core::media::{MediaAction, MediaHub, MediaSessionEvent, MediaSessionId};
 use craft_core::tab::{Tab, TabGroup, TabId};
-use craft_engine::{EngineCommand, EngineEvent, ServoEngine};
+use craft_engine::{Backend, Engine, EngineEvent, TabEngine};
 use craft_sync::protocol::SyncPreferences;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::info;
 
 pub use omnibox::{OmniboxState, OmniboxTarget};
+pub use page::{PageSlot, ServoPageController};
 pub use tab_manager::{TabNode, TabState, VerticalTabManager};
 pub use window::{BrowserWindowApp, run_window_event_loop};
 
@@ -25,8 +26,11 @@ pub struct BrowserApp {
     pub active_tab_id: Option<TabId>,
     pub groups: Vec<TabGroup>,
     pub containers: Vec<Container>,
-    pub engine: ServoEngine,
-    pub cmd_sender: mpsc::UnboundedSender<EngineCommand>,
+    /// The engine boundary. The chrome holds a trait object so nothing here
+    /// names Servo; the backend-specific page handle lives in `craft_ui::page`.
+    pub engine: Box<dyn Engine>,
+    /// Published to by `window.rs` once it has built the real page.
+    page_slot: PageSlot,
     pub omnibox: OmniboxState,
     pub tab_manager: VerticalTabManager,
     pub media_hub: MediaHub,
@@ -87,7 +91,13 @@ impl BrowserApp {
             ),
         ];
 
-        let (engine, cmd_sender) = ServoEngine::new(adblock.clone());
+        // The chrome owns the control plane; the window hands it a page to drive
+        // once the winit/GL surface exists (see `PageSlot::attach`).
+        let page_slot = PageSlot::default();
+        let engine: Box<dyn Engine> = Box::new(TabEngine::new(
+            Backend::Servo,
+            ServoPageController::new(page_slot.clone()),
+        ));
 
         Self {
             adblock,
@@ -97,11 +107,16 @@ impl BrowserApp {
             groups: Vec::new(),
             containers,
             engine,
-            cmd_sender,
+            page_slot,
             omnibox,
             tab_manager,
             media_hub,
         }
+    }
+
+    /// The handle the window publishes its live page into.
+    pub fn page_slot(&self) -> &PageSlot {
+        &self.page_slot
     }
 
     /// Look up a container's display color (hex) and icon by id. Falls back to
@@ -142,9 +157,10 @@ impl BrowserApp {
         self.tab_manager
             .insert_tab(tab_id.clone(), parent_id, container_id.clone(), url);
 
-        // Spawn a corresponding Servo browser context partitioned by container
-        self.engine
-            .create_context(tab_id.clone(), container_id, url);
+        // Register the tab in the engine control plane. No page is created for
+        // it yet: per-tab rendering surfaces are Phase 2b, and the window owns
+        // surface creation until then.
+        self.engine.create_tab(&tab_id, &container_id, url);
         self.active_tab_id = Some(tab_id.clone());
         self.tab_manager.active_tab_id = Some(tab_id.clone());
         self.omnibox.set_text(url);
@@ -193,28 +209,29 @@ impl BrowserApp {
                 }
             });
 
+            // Waking a tab re-registers it with the control plane: its page
+            // record starts clean again, because a hibernated tab's content is
+            // gone and per-tab surfaces do not exist yet.
             if let Some((container_id, url)) = wake_info {
                 self.tab_manager.wake_tab(tab_id);
-                self.engine
-                    .create_context(tab_id.clone(), container_id, &url);
+                self.engine.create_tab(tab_id, &container_id, &url);
             }
         }
     }
 
+    /// Discard a background tab's page. This forgets the tab's engine record;
+    /// the shared page itself is only released if this tab owned it, because
+    /// per-tab surfaces arrive with Phase 2b.
     pub fn hibernate_tab(&mut self, tab_id: &TabId) {
         if self.active_tab_id.as_ref() == Some(tab_id) {
             return; // Never hibernate active tab
         }
         self.tab_manager.hibernate_tab(tab_id);
-        let _ = self.cmd_sender.send(EngineCommand::DestroyContext {
-            tab_id: tab_id.clone(),
-        });
+        self.engine.close_tab(tab_id);
     }
 
     pub fn close_tab(&mut self, tab_id: &TabId) {
-        let _ = self.cmd_sender.send(EngineCommand::DestroyContext {
-            tab_id: tab_id.clone(),
-        });
+        self.engine.close_tab(tab_id);
         self.tabs.retain(|t| &t.id != tab_id);
         self.tab_manager.remove_tab(tab_id);
 
@@ -231,14 +248,25 @@ impl BrowserApp {
         }
     }
 
+    /// Drain engine events and apply them to the chrome.
+    ///
+    /// These arrive from the engine's own view of its page (a redirect, a
+    /// finished load, a new title), so page truth flows one way: engine to
+    /// chrome. Nothing here assumes a load succeeded.
     pub fn poll_engine_events(&mut self) -> Vec<EngineEvent> {
         let events = self.engine.poll_events();
-        for evt in &events {
-            let EngineEvent::Navigation(nav) = evt;
-            if self.active_tab_id.as_ref() == Some(&nav.tab_id) {
-                self.omnibox.set_text(&nav.url);
-            }
+        for event in &events {
+            let EngineEvent::Navigation(nav) = event;
             self.tab_manager.update_tab_url(&nav.tab_id, &nav.url);
+            if let Some(snapshot) = self.engine.page_snapshot(&nav.tab_id) {
+                if !snapshot.title.is_empty() {
+                    self.tab_manager
+                        .update_tab_title(&nav.tab_id, &snapshot.title);
+                }
+                if self.active_tab_id.as_ref() == Some(&nav.tab_id) {
+                    self.omnibox.set_text(&snapshot.url);
+                }
+            }
         }
         events
     }

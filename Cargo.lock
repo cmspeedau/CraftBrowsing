@@ -1232,13 +1232,8 @@ dependencies = [
 name = "craft-engine"
 version = "0.1.0"
 dependencies = [
- "craft-adblock",
  "craft-core",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
- "winit",
 ]
 
 [[package]]

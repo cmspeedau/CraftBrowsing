@@ -1,342 +1,204 @@
-//! Servo rendering engine integration and lifecycle manager for CraftBrowsing.
+//! Engine control plane for CraftBrowsing: the [`Engine`] boundary plus
+//! [`TabEngine`], the backend-agnostic tab records the browser chrome drives.
+//!
+//! There is no simulation in this crate. Every page operation is delegated to a
+//! host-implemented [`PageController`], and every reported state comes from
+//! comparing what the controller says about its page against what was reported
+//! last time. The earlier `ServoEngine` here was a worker thread that answered
+//! its own commands with fabricated `Completed`/200 navigation events; it has
+//! been removed, because a chrome driven by invented engine events cannot tell a
+//! real load from a failed one.
+//!
+//! Painting and compositing are not here either. They live in
+//! `craft-ui::window` until Phase 2b; see `engine.rs` and docs/engine-decision.md.
 
 pub mod compositor;
 pub mod engine;
 pub mod events;
 pub mod pipeline;
 
-use craft_adblock::AdblockManager;
+use std::collections::{HashMap, VecDeque};
+
 use craft_core::container::ContainerId;
 use craft_core::tab::TabId;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::info;
 
-pub use compositor::CompositorSurface;
-pub use engine::{Backend, Engine, PageSnapshot};
+pub use engine::{Backend, Engine, PageController, PageSnapshot};
 pub use events::{EngineEvent, NavigationEvent, PageLoadState};
 
-/// Represents an individual Servo browsing context tied to a Tab and Container.
-#[derive(Debug)]
-pub struct EngineContext {
+/// A tab as the control plane sees it: its container partition and the last page
+/// state the backend reported for it.
+#[derive(Debug, Clone)]
+pub struct TabRecord {
     pub tab_id: TabId,
     pub container_id: ContainerId,
-    pub current_url: String,
-    pub title: String,
-    pub load_state: PageLoadState,
-    pub can_go_back: bool,
-    pub can_go_forward: bool,
-    pub viewport_width: u32,
-    pub viewport_height: u32,
-    pub hidpi_scale_factor: f32,
+    pub snapshot: PageSnapshot,
 }
 
-impl EngineContext {
-    pub fn new(tab_id: TabId, container_id: ContainerId, initial_url: &str) -> Self {
+/// Backend-agnostic engine handle. It owns the tab records and the event queue,
+/// delegates all page operations to `C`, and turns real page-state changes into
+/// [`EngineEvent`]s.
+///
+/// `live` is which tab the controller's single current page belongs to. Page
+/// operations move it, because with one shared surface (the Servo situation
+/// until Phase 2b) navigating a tab *is* changing what the window shows.
+pub struct TabEngine<C: PageController> {
+    backend: Backend,
+    controller: C,
+    tabs: HashMap<TabId, TabRecord>,
+    live: Option<TabId>,
+    pending: VecDeque<EngineEvent>,
+}
+
+impl<C: PageController> TabEngine<C> {
+    pub fn new(backend: Backend, controller: C) -> Self {
+        info!(
+            "Engine control plane initialised (backend: {})",
+            backend.as_str()
+        );
         Self {
-            tab_id,
-            container_id,
-            current_url: initial_url.to_string(),
-            title: String::from("New Tab"),
-            load_state: PageLoadState::Initial,
-            can_go_back: false,
-            can_go_forward: false,
-            viewport_width: 1280,
-            viewport_height: 720,
-            hidpi_scale_factor: 1.0,
+            backend,
+            controller,
+            tabs: HashMap::new(),
+            live: None,
+            pending: VecDeque::new(),
         }
     }
-}
 
-/// Commands sent from the UI shell to the Servo Engine worker.
-#[derive(Debug)]
-pub enum EngineCommand {
-    CreateContext {
-        tab_id: TabId,
-        container_id: ContainerId,
-        url: String,
-    },
-    DestroyContext {
-        tab_id: TabId,
-    },
-    Navigate {
-        tab_id: TabId,
-        url: String,
-    },
-    Reload {
-        tab_id: TabId,
-        bypass_cache: bool,
-    },
-    Stop {
-        tab_id: TabId,
-    },
-    GoBack {
-        tab_id: TabId,
-    },
-    GoForward {
-        tab_id: TabId,
-    },
-    ResizeViewport {
-        tab_id: TabId,
-        width: u32,
-        height: u32,
-    },
-    SetHidpiScaleFactor {
-        tab_id: TabId,
-        scale: f32,
-    },
-    ActivateTab {
-        tab_id: TabId,
-    },
-    ExecuteScript {
-        tab_id: TabId,
-        script: String,
-    },
-}
+    /// Number of tabs the control plane is tracking.
+    pub fn tracked_tabs(&self) -> usize {
+        self.tabs.len()
+    }
 
-/// The Servo Engine runner managing WebRender surfaces and containerized network sandboxes.
-pub struct ServoEngine {
-    cmd_sender: mpsc::UnboundedSender<EngineCommand>,
-    event_receiver: mpsc::UnboundedReceiver<EngineEvent>,
-    contexts: HashMap<TabId, EngineContext>,
-    // Reserved for the Servo resource-interception integration; not read by the
-    // simulated engine yet.
-    #[allow(dead_code)]
-    adblock: Arc<AdblockManager>,
-}
+    /// Which tab owns the live page, if any.
+    pub fn live_tab(&self) -> Option<&TabId> {
+        self.live.as_ref()
+    }
 
-impl ServoEngine {
-    /// Initialize the Servo Engine bridge with adblocking and container routing.
-    pub fn new(adblock: Arc<AdblockManager>) -> (Self, mpsc::UnboundedSender<EngineCommand>) {
-        info!("Initializing Servo Engine runtime and WebRender pipeline...");
-        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<EngineCommand>();
-        let (event_tx, event_rx) = mpsc::unbounded_channel::<EngineEvent>();
-
-        // Spawn Servo engine event loop worker thread
-        std::thread::Builder::new()
-            .name("servo-engine-worker".into())
-            .spawn(move || {
-                info!("Servo engine worker thread started.");
-                while let Some(command) = cmd_rx.blocking_recv() {
-                    match command {
-                        EngineCommand::CreateContext {
-                            tab_id,
-                            container_id,
-                            url,
-                        } => {
-                            info!(
-                                "Engine: creating browsing context for tab {:?} in container {:?}",
-                                tab_id, container_id
-                            );
-                            let _ = event_tx.send(EngineEvent::Navigation(NavigationEvent {
-                                tab_id: tab_id.clone(),
-                                state: PageLoadState::Started,
-                                url: url.clone(),
-                                status_code: None,
-                            }));
-
-                            let _ = event_tx.send(EngineEvent::Navigation(NavigationEvent {
-                                tab_id,
-                                state: PageLoadState::Completed,
-                                url,
-                                status_code: Some(200),
-                            }));
-                        }
-                        EngineCommand::Navigate { tab_id, url } => {
-                            info!("Engine: navigating tab {:?} to {}", tab_id, url);
-                            let _ = event_tx.send(EngineEvent::Navigation(NavigationEvent {
-                                tab_id: tab_id.clone(),
-                                state: PageLoadState::Started,
-                                url: url.clone(),
-                                status_code: None,
-                            }));
-                            let _ = event_tx.send(EngineEvent::Navigation(NavigationEvent {
-                                tab_id,
-                                state: PageLoadState::Completed,
-                                url,
-                                status_code: Some(200),
-                            }));
-                        }
-                        EngineCommand::DestroyContext { tab_id } => {
-                            info!("Engine: destroying context for tab {:?}", tab_id);
-                        }
-                        EngineCommand::ResizeViewport {
-                            tab_id,
-                            width,
-                            height,
-                        } => {
-                            info!(
-                                "Engine: resized tab {:?} viewport to {}x{}",
-                                tab_id, width, height
-                            );
-                        }
-                        EngineCommand::SetHidpiScaleFactor { tab_id, scale } => {
-                            info!("Engine: tab {:?} hidpi scale {}", tab_id, scale);
-                        }
-                        EngineCommand::ActivateTab { tab_id } => {
-                            info!("Engine: activate tab {:?}", tab_id);
-                        }
-                        EngineCommand::Reload {
-                            tab_id,
-                            bypass_cache,
-                        } => {
-                            info!(
-                                "Engine: reload tab {:?} (bypass_cache: {})",
-                                tab_id, bypass_cache
-                            );
-                        }
-                        EngineCommand::Stop { tab_id } => {
-                            info!("Engine: stop loading tab {:?}", tab_id);
-                        }
-                        EngineCommand::GoBack { tab_id } => {
-                            info!("Engine: navigate back on tab {:?}", tab_id);
-                        }
-                        EngineCommand::GoForward { tab_id } => {
-                            info!("Engine: navigate forward on tab {:?}", tab_id);
-                        }
-                        EngineCommand::ExecuteScript { tab_id, script: _ } => {
-                            info!("Engine: executing script on tab {:?}", tab_id);
-                        }
-                    }
+    /// Mark `tab_id` as owning the live page and note that a load began. The URL
+    /// in the event is what we currently know about the page, never a guess about
+    /// where the engine will end up.
+    fn begin_load(&mut self, tab_id: &TabId, url: Option<&str>) {
+        self.live = Some(tab_id.clone());
+        let url = match url {
+            Some(url) => {
+                if let Some(record) = self.tabs.get_mut(tab_id) {
+                    record.snapshot.url = url.to_string();
                 }
-                info!("Servo engine worker thread terminated.");
-            })
-            .expect("failed to spawn servo engine worker thread");
-
-        let engine = Self {
-            cmd_sender: cmd_tx.clone(),
-            event_receiver: event_rx,
-            contexts: HashMap::new(),
-            adblock,
-        };
-
-        (engine, cmd_tx)
-    }
-
-    /// Issue a command to create a new browsing context for a tab.
-    pub fn create_context(&mut self, tab_id: TabId, container_id: ContainerId, url: &str) {
-        let context = EngineContext::new(tab_id.clone(), container_id.clone(), url);
-        self.contexts.insert(tab_id.clone(), context);
-        let _ = self.cmd_sender.send(EngineCommand::CreateContext {
-            tab_id,
-            container_id,
-            url: url.to_string(),
-        });
-    }
-
-    /// Navigate an existing tab context to a target URL.
-    pub fn navigate(&mut self, tab_id: &TabId, url: &str) {
-        if let Some(ctx) = self.contexts.get_mut(tab_id) {
-            ctx.current_url = url.to_string();
-            ctx.load_state = PageLoadState::Started;
-            let _ = self.cmd_sender.send(EngineCommand::Navigate {
-                tab_id: tab_id.clone(),
-                url: url.to_string(),
-            });
-        }
-    }
-
-    /// Poll for engine events (navigation changes, title updates, repaint readiness).
-    pub fn poll_events(&mut self) -> Vec<EngineEvent> {
-        let mut events = Vec::new();
-        while let Ok(event) = self.event_receiver.try_recv() {
-            if let EngineEvent::Navigation(ref nav) = event
-                && let Some(ctx) = self.contexts.get_mut(&nav.tab_id)
-            {
-                ctx.load_state = nav.state.clone();
+                url.to_string()
             }
-            events.push(event);
+            None => self
+                .tabs
+                .get(tab_id)
+                .map(|record| record.snapshot.url.clone())
+                .unwrap_or_default(),
+        };
+        if let Some(record) = self.tabs.get_mut(tab_id) {
+            record.snapshot.load_state = PageLoadState::Started;
         }
-        events
+        self.pending
+            .push_back(EngineEvent::Navigation(NavigationEvent {
+                tab_id: tab_id.clone(),
+                state: PageLoadState::Started,
+                url,
+            }));
+    }
+
+    /// Pull the live page's own state in and emit an event when it moved, so a
+    /// redirect or a finished load reaches the chrome instead of being assumed.
+    fn refresh_from_page(&mut self) {
+        let Some(live) = self.live.clone() else {
+            return;
+        };
+        let Some(snapshot) = self.controller.snapshot() else {
+            return;
+        };
+        let Some(record) = self.tabs.get_mut(&live) else {
+            return;
+        };
+        let changed = record.snapshot.url != snapshot.url
+            || record.snapshot.load_state != snapshot.load_state;
+        if changed {
+            self.pending
+                .push_back(EngineEvent::Navigation(NavigationEvent {
+                    tab_id: live,
+                    state: snapshot.load_state.clone(),
+                    url: snapshot.url.clone(),
+                }));
+        }
+        // Title and history availability are kept fresh either way: the chrome
+        // reads them from `page_snapshot` and must not see a stale value just
+        // because the URL and load state did not move.
+        record.snapshot = snapshot;
     }
 }
 
-impl Engine for ServoEngine {
+impl<C: PageController> Engine for TabEngine<C> {
     fn backend(&self) -> Backend {
-        Backend::Servo
+        self.backend
     }
 
     fn create_tab(&mut self, tab_id: &TabId, container_id: &ContainerId, url: &str) {
-        self.create_context(tab_id.clone(), container_id.clone(), url);
+        self.tabs.insert(
+            tab_id.clone(),
+            TabRecord {
+                tab_id: tab_id.clone(),
+                container_id: container_id.clone(),
+                snapshot: PageSnapshot::initial(url),
+            },
+        );
     }
 
     fn close_tab(&mut self, tab_id: &TabId) {
-        self.contexts.remove(tab_id);
-        let _ = self.cmd_sender.send(EngineCommand::DestroyContext {
-            tab_id: tab_id.clone(),
-        });
+        self.tabs.remove(tab_id);
+        if self.live.as_ref() == Some(tab_id) {
+            // The host still shows the last page until something else loads;
+            // there is no page left to report for this tab.
+            self.live = None;
+        }
+    }
+
+    fn set_live_page(&mut self, tab_id: &TabId) {
+        if self.tabs.contains_key(tab_id) {
+            self.live = Some(tab_id.clone());
+        }
     }
 
     fn navigate(&mut self, tab_id: &TabId, url: &str) {
-        ServoEngine::navigate(self, tab_id, url);
+        self.controller.load_url(url);
+        self.begin_load(tab_id, Some(url));
     }
 
     fn reload(&mut self, tab_id: &TabId, bypass_cache: bool) {
-        let _ = self.cmd_sender.send(EngineCommand::Reload {
-            tab_id: tab_id.clone(),
-            bypass_cache,
-        });
+        self.controller.reload(bypass_cache);
+        self.begin_load(tab_id, None);
     }
 
     fn stop(&mut self, tab_id: &TabId) {
-        let _ = self.cmd_sender.send(EngineCommand::Stop {
-            tab_id: tab_id.clone(),
-        });
+        // Only the tab that owns the live page can be stopped, and no event is
+        // emitted here: the page reports its own stopped state on the next poll.
+        // That is the difference between this and the fake engine it replaced.
+        if self.live.as_ref() == Some(tab_id) {
+            self.controller.stop();
+        }
     }
 
     fn go_back(&mut self, tab_id: &TabId) {
-        let _ = self.cmd_sender.send(EngineCommand::GoBack {
-            tab_id: tab_id.clone(),
-        });
+        self.controller.go_back();
+        self.begin_load(tab_id, None);
     }
 
     fn go_forward(&mut self, tab_id: &TabId) {
-        let _ = self.cmd_sender.send(EngineCommand::GoForward {
-            tab_id: tab_id.clone(),
-        });
-    }
-
-    fn resize(&mut self, tab_id: &TabId, width: u32, height: u32) {
-        if let Some(ctx) = self.contexts.get_mut(tab_id) {
-            ctx.viewport_width = width;
-            ctx.viewport_height = height;
-        }
-        let _ = self.cmd_sender.send(EngineCommand::ResizeViewport {
-            tab_id: tab_id.clone(),
-            width,
-            height,
-        });
-    }
-
-    fn set_hidpi_scale_factor(&mut self, tab_id: &TabId, scale: f32) {
-        if let Some(ctx) = self.contexts.get_mut(tab_id) {
-            ctx.hidpi_scale_factor = scale;
-        }
-        let _ = self.cmd_sender.send(EngineCommand::SetHidpiScaleFactor {
-            tab_id: tab_id.clone(),
-            scale,
-        });
-    }
-
-    fn set_active_tab(&mut self, tab_id: &TabId) {
-        let _ = self.cmd_sender.send(EngineCommand::ActivateTab {
-            tab_id: tab_id.clone(),
-        });
+        self.controller.go_forward();
+        self.begin_load(tab_id, None);
     }
 
     fn poll_events(&mut self) -> Vec<EngineEvent> {
-        ServoEngine::poll_events(self)
+        self.refresh_from_page();
+        self.pending.drain(..).collect()
     }
 
     fn page_snapshot(&self, tab_id: &TabId) -> Option<PageSnapshot> {
-        let ctx = self.contexts.get(tab_id)?;
-        Some(PageSnapshot {
-            url: ctx.current_url.clone(),
-            title: ctx.title.clone(),
-            load_state: ctx.load_state.clone(),
-            can_go_back: ctx.can_go_back,
-            can_go_forward: ctx.can_go_forward,
-        })
+        self.tabs.get(tab_id).map(|record| record.snapshot.clone())
     }
 }

@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use egui_glow::EguiGlow;
@@ -31,21 +30,16 @@ use craft_core::media::MediaAction;
 #[derive(Debug)]
 struct WakerEvent;
 
-/// Live page state shared between the Servo delegate and the chrome.
-#[derive(Debug, Default)]
-struct PageState {
-    url: String,
-    title: String,
-    loading: bool,
-    can_go_back: bool,
-    can_go_forward: bool,
-}
-
-/// Delegate that forwards Servo frame-ready notifications to winit.
+/// Delegate that forwards Servo notifications to winit.
+///
+/// It deliberately stores no page state: URL, title, load state and history
+/// availability reach the chrome through the engine boundary
+/// (`Engine::poll_events` / `Engine::page_snapshot`), which reads them from the
+/// `WebView` itself. A second copy here would be a second truth. The delegate's
+/// job is to ask for a redraw so that poll happens promptly.
 struct BrowserWebViewDelegate {
     window: Arc<Window>,
     new_frame: Arc<AtomicBool>,
-    page: Arc<Mutex<PageState>>,
 }
 
 impl WebViewDelegate for BrowserWebViewDelegate {
@@ -55,22 +49,17 @@ impl WebViewDelegate for BrowserWebViewDelegate {
     }
 
     fn notify_url_changed(&self, _: WebView, url: Url) {
-        self.page.lock().unwrap().url = url.to_string();
+        info!("page url: {url}");
         self.window.request_redraw();
     }
 
     fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
-        self.page.lock().unwrap().title = title.unwrap_or_default();
+        info!("page title: {:?}", title.as_deref().unwrap_or_default());
         self.window.request_redraw();
     }
 
-    fn notify_load_status_changed(&self, webview: WebView, status: LoadStatus) {
-        {
-            let mut page = self.page.lock().unwrap();
-            page.loading = matches!(status, LoadStatus::Started | LoadStatus::HeadParsed);
-            page.can_go_back = webview.can_go_back();
-            page.can_go_forward = webview.can_go_forward();
-        }
+    fn notify_load_status_changed(&self, _: WebView, status: LoadStatus) {
+        info!("load status: {status:?}");
         self.window.request_redraw();
     }
 
@@ -119,8 +108,10 @@ pub struct BrowserWindowApp {
     offscreen: Option<Rc<OffscreenRenderingContext>>,
     egui: Option<EguiGlow>,
     new_frame: Arc<AtomicBool>,
-    page: Arc<Mutex<PageState>>,
     omnibox_buffer: String,
+    /// True while the address bar holds the text cursor, so a page reporting a
+    /// new URL cannot overwrite what the user is typing.
+    omnibox_focused: bool,
     home_url: String,
     media_hub_open: bool,
     menu_open: bool,
@@ -140,8 +131,8 @@ impl BrowserWindowApp {
             offscreen: None,
             egui: None,
             new_frame: Arc::new(AtomicBool::new(true)),
-            page: Arc::new(Mutex::new(PageState::default())),
             omnibox_buffer: String::new(),
+            omnibox_focused: false,
             home_url: "https://example.com".to_string(),
             media_hub_open: false,
             menu_open: false,
@@ -198,6 +189,9 @@ impl Drop for BrowserWindowApp {
             let _ = rc.make_current();
             egui.destroy();
         }
+        // Release the engine's reference to the page before Servo and its GL
+        // context go away, so no controller call can reach a freed WebView.
+        self.app.page_slot().detach();
         self.webview = None;
         self.offscreen = None;
         self.egui = None;
@@ -214,7 +208,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
         }
 
         let window_attributes = WindowAttributes::default()
-            .with_title("CraftBrowsing - Pure-Rust Servo Web Browser")
+            .with_title("CraftBrowsing")
             .with_inner_size(LogicalSize::new(1280.0, 720.0));
 
         let window = Arc::new(
@@ -259,13 +253,11 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
         let delegate = Rc::new(BrowserWebViewDelegate {
             window: window.clone(),
             new_frame: self.new_frame.clone(),
-            page: self.page.clone(),
         });
 
         let url =
             Url::parse(&self.initial_url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
 
-        self.page.lock().unwrap().url = url.to_string();
         self.omnibox_buffer = url.to_string();
 
         let webview = WebViewBuilder::new(&servo, webview_context)
@@ -293,9 +285,16 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
         self.offscreen = Some(offscreen);
         self.egui = Some(egui);
 
+        // Hand the live page to the engine boundary, then adopt it as the first
+        // tab's page. The tab is opened with the URL the webview was actually
+        // built with, so the chrome model and the real page agree from frame 1.
+        if let Some(webview) = self.webview.as_ref() {
+            self.app.page_slot().attach(webview);
+        }
         if self.app.tabs.is_empty() {
-            self.app
-                .open_tab("craft://welcome", ContainerId::default_container());
+            let url = self.initial_url.clone();
+            let tab_id = self.app.open_tab(&url, ContainerId::default_container());
+            self.app.engine.set_live_page(&tab_id);
         }
     }
 
@@ -346,6 +345,21 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
 
                 let _ = self.app.poll_engine_events();
 
+                // Keep the address bar showing the page's real URL, redirects
+                // included, unless the caret is in the bar.
+                if !self.omnibox_focused {
+                    let page_url = self
+                        .app
+                        .active_tab_id
+                        .as_ref()
+                        .and_then(|id| self.app.engine.page_snapshot(id))
+                        .map(|page| page.url)
+                        .unwrap_or_default();
+                    if !page_url.is_empty() && page_url != self.omnibox_buffer {
+                        self.omnibox_buffer = page_url;
+                    }
+                }
+
                 // Make GL context current (shared by the window and offscreen).
                 rendering_context.make_current().expect("make_current");
 
@@ -353,8 +367,8 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                 let app = &mut self.app;
                 let webview_nav = self.webview.clone();
                 let offscreen = self.offscreen.clone();
-                let page = self.page.clone();
                 let buffer = &mut self.omnibox_buffer;
+                let omnibox_focused = &mut self.omnibox_focused;
                 let webview_home = self.home_url.clone();
                 let media_open = &mut self.media_hub_open;
                 let menu_open = &mut self.menu_open;
@@ -470,26 +484,37 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                     .stroke(egui::Stroke::NONE),
                             )
                             .show_inside(ui, |ui| {
-                                let (loading, can_back, can_fwd) = {
-                                    let p = page.lock().unwrap();
-                                    (p.loading, p.can_go_back, p.can_go_forward)
+                                // Page state and page actions both come from the
+                                // engine boundary: the chrome never calls into
+                                // `servo` types here.
+                                let active = app.active_tab_id.clone();
+                                let snapshot = active
+                                    .as_ref()
+                                    .and_then(|id| app.engine.page_snapshot(id));
+                                let (loading, can_back, can_fwd) = match &snapshot {
+                                    Some(page) => (
+                                        page.load_state.is_loading(),
+                                        page.can_go_back,
+                                        page.can_go_forward,
+                                    ),
+                                    None => (false, false, false),
                                 };
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 4.0;
-                                    if let Some(wv) = &webview_nav {
+                                    if let Some(active_id) = &active {
                                         if ui
                                             .add_enabled(can_back, icon_button("←"))
                                             .on_hover_text("Back")
                                             .clicked()
                                         {
-                                            let _ = wv.go_back(1);
+                                            app.engine.go_back(active_id);
                                         }
                                         if ui
                                             .add_enabled(can_fwd, icon_button("→"))
                                             .on_hover_text("Forward")
                                             .clicked()
                                         {
-                                            let _ = wv.go_forward(1);
+                                            app.engine.go_forward(active_id);
                                         }
                                         if ui
                                             .add(if loading { icon_button("✕") } else { icon_button("⟳") })
@@ -497,18 +522,17 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                             .clicked()
                                         {
                                             if loading {
-                                                wv.evaluate_javascript("window.stop()", |_| {});
+                                                app.engine.stop(active_id);
                                             } else {
-                                                wv.reload();
+                                                app.engine.reload(active_id, false);
                                             }
                                         }
                                         if ui
                                             .add(icon_button("⌂"))
                                             .on_hover_text("Home")
                                             .clicked()
-                                            && let Ok(home) = Url::parse(&webview_home.clone())
                                         {
-                                            wv.load(home);
+                                            app.navigate_tab(active_id, &webview_home.clone());
                                         }
                                     }
 
@@ -547,6 +571,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                                         .desired_width(text_width)
                                                         .hint_text("Search or enter address"),
                                                 );
+                                                *omnibox_focused = resp.has_focus();
                                                 // Pressing Enter on a single-line field makes it
                                                 // lose focus the same frame, so detect the commit via
                                                 // lost_focus, not has_focus.
@@ -563,11 +588,11 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                                         } => u,
                                                     };
                                                     *buffer = target.clone();
-                                                    if let Some(wv) = &webview_nav
-                                                        && let Ok(parsed) = Url::parse(&target)
-                                                    {
-                                                        wv.load(parsed);
-                                                    }
+                                                    // One path for the chrome model and the engine:
+                                                    // the tab records the request, the engine loads
+                                                    // it, and the page reports where it actually
+                                                    // landed through the event stream.
+                                                    app.submit_omnibox(&target);
                                                 }
                                             });
                                         });
@@ -742,16 +767,25 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                     egui.paint(&window_ref);
                 }
 
-                // Reflect page title in the window title.
-                {
-                    let p = self.page.lock().unwrap();
-                    let title = if p.title.is_empty() {
-                        format!("CraftBrowsing - {}", p.url)
-                    } else {
-                        format!("CraftBrowsing - {}", p.title)
-                    };
-                    window.set_title(&title);
-                }
+                // Reflect the page the engine reports in the window title.
+                let page_label = self
+                    .app
+                    .active_tab_id
+                    .as_ref()
+                    .and_then(|id| self.app.engine.page_snapshot(id))
+                    .map(|page| {
+                        if page.title.is_empty() {
+                            page.url
+                        } else {
+                            page.title
+                        }
+                    })
+                    .filter(|text| !text.is_empty());
+                let title = match page_label {
+                    Some(text) => format!("CraftBrowsing - {text}"),
+                    None => "CraftBrowsing".to_string(),
+                };
+                window.set_title(&title);
 
                 rendering_context.present();
 
@@ -789,10 +823,13 @@ impl BrowserWindowApp {
         }
         match &event.logical_key {
             Key::Character(c) if c.to_ascii_lowercase() == "t" => {
+                // `about:blank` rather than `craft://welcome`: internal pages
+                // are not registered with the engine, so that URL would open as
+                // a failed load. Roadmap item, not a placeholder to keep.
                 info!("Shortcut: New Tab");
                 let tab_id = self
                     .app
-                    .open_tab("craft://welcome", ContainerId::default_container());
+                    .open_tab("about:blank", ContainerId::default_container());
                 info!("Created tab: {:?}", tab_id);
             }
             Key::Character(c) if c.to_ascii_lowercase() == "w" => {
@@ -802,18 +839,15 @@ impl BrowserWindowApp {
                 }
             }
             Key::Character(c) if c.to_ascii_lowercase() == "r" => {
-                if let Some(active_id) = self.app.active_tab_id.as_ref() {
+                if let Some(active_id) = self.app.active_tab_id.clone() {
                     info!("Shortcut: Reload Tab {:?}", active_id);
-                    if let Some(webview) = self.webview.as_ref() {
-                        webview.reload();
-                    }
+                    self.app.engine.reload(&active_id, false);
                 }
             }
             Key::Named(NamedKey::Escape) => {
-                if let Some(active_id) = self.app.active_tab_id.as_ref() {
-                    let _ = self.app.cmd_sender.send(craft_engine::EngineCommand::Stop {
-                        tab_id: active_id.clone(),
-                    });
+                if let Some(active_id) = self.app.active_tab_id.clone() {
+                    info!("Shortcut: Stop load {:?}", active_id);
+                    self.app.engine.stop(&active_id);
                 }
             }
             _ => {}
