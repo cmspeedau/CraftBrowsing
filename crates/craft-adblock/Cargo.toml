@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-craft-core = { path = "../craft-core" }
 adblock = { workspace = true }
-rmp = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
+# Declared only to pin the version `adblock`'s `rmp-serde` resolves against
+# (0.8.14; newer rmp removed functions rmp-serde 0.15 still calls, which breaks
+# the build). No code here uses `rmp` directly, and cargo will say so: do not
+# "clean up" this line, the version constraint is the reason it exists.
+rmp = { workspace = true }

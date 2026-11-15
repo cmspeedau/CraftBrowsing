@@ -36,6 +36,9 @@ egui-winit = { version = "0.34.3", default-features = false }
 egui_glow = { version = "0.34.3", default-features = false, features = ["winit", "x11", "wayland"] }
 glow = "0.17"
 dirs = "5"
+# Shared by the transfer engine and the filter list updater: rustls only, no
+# system TLS, and `blocking` for the updater thread.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "stream", "gzip", "brotli", "charset", "http2", "json"] }
 thiserror = "2"
 rmp = "=0.8.14"
 

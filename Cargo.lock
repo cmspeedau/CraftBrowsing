@@ -1212,9 +1212,9 @@ name = "craft-adblock"
 version = "0.1.0"
 dependencies = [
  "adblock",
- "craft-core",
  "rmp",
  "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -1300,11 +1300,13 @@ dependencies = [
  "craft-core",
  "craft-engine",
  "craft-sync",
+ "dirs",
  "egui",
  "egui-winit",
  "egui_glow",
  "euclid",
  "glow",
+ "reqwest",
  "rustls",
  "serde",
  "serde_json",
@@ -5681,6 +5683,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
