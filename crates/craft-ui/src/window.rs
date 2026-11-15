@@ -9,7 +9,8 @@ use euclid::Scale;
 
 use servo::{
     ConsoleLogLevel, EventLoopWaker, LoadStatus, OffscreenRenderingContext, RenderingContext,
-    Servo, ServoBuilder, WebView, WebViewBuilder, WebViewDelegate, WindowRenderingContext,
+    Servo, ServoBuilder, WebResourceLoad, WebResourceResponse, WebView, WebViewBuilder,
+    WebViewDelegate, WindowRenderingContext,
 };
 use tracing::{error, info, warn};
 use url::Url;
@@ -23,6 +24,8 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::BrowserApp;
 use crate::omnibox::{OmniboxState, OmniboxTarget};
+use crate::shields::{ShieldStats, adblock_request_type};
+use craft_adblock::AdblockManager;
 use craft_core::container::ContainerId;
 use craft_core::media::MediaAction;
 
@@ -37,15 +40,61 @@ struct WakerEvent;
 /// (`Engine::poll_events` / `Engine::page_snapshot`), which reads them from the
 /// `WebView` itself. A second copy here would be a second truth. The delegate's
 /// job is to ask for a redraw so that poll happens promptly.
+///
+/// It does enforce tracking protection, because Servo routes every web resource
+/// of a `WebView` through [`WebViewDelegate::load_web_resource`] and that is the
+/// only request hook this engine offers.
 struct BrowserWebViewDelegate {
     window: Arc<Window>,
     new_frame: Arc<AtomicBool>,
+    adblock: Arc<AdblockManager>,
+    shields: Arc<ShieldStats>,
 }
 
 impl WebViewDelegate for BrowserWebViewDelegate {
     fn notify_new_frame_ready(&self, _: WebView) {
         self.new_frame.store(true, Ordering::Release);
         self.window.request_redraw();
+    }
+
+    fn load_web_resource(&self, _: WebView, load: WebResourceLoad) {
+        // Servo calls this for every HTTP(S) resource the page asks for.
+        // Dropping `load` unanswered means "do not intercept", so an allowed
+        // request costs one rule lookup and nothing else.
+        let (url, source, kind, is_main_frame) = {
+            let request = load.request();
+            (
+                request.url.clone(),
+                request
+                    .referrer_url
+                    .as_ref()
+                    .map(|url| url.as_str().to_string())
+                    .unwrap_or_default(),
+                adblock_request_type(&request.destination),
+                request.is_for_main_frame,
+            )
+        };
+        if is_main_frame {
+            // Never refuse the top-level document. An empty page with no
+            // explanation reads as a broken browser rather than as protection;
+            // a blocked document needs its own UI, which is not built yet.
+            return;
+        }
+
+        if !self
+            .adblock
+            .check_network_request(url.as_str(), &source, kind)
+        {
+            return;
+        }
+
+        self.shields.record_block();
+        info!("shields: blocked {kind} request to {}", url.as_str());
+        // Cancelled instead of answered with an empty 200: the page sees a
+        // failed request, which is what a blocked tracker looks like from any
+        // other network path, and no script can read our silence as success.
+        load.intercept(WebResourceResponse::new(url.as_url().clone()))
+            .cancel();
     }
 
     fn notify_url_changed(&self, _: WebView, url: Url) {
@@ -253,6 +302,8 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
         let delegate = Rc::new(BrowserWebViewDelegate {
             window: window.clone(),
             new_frame: self.new_frame.clone(),
+            adblock: self.app.adblock.clone(),
+            shields: self.app.shields.clone(),
         });
 
         let url =
@@ -464,7 +515,10 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                         .on_hover_text("New tab in default container")
                                         .clicked()
                                     {
-                                        app.open_tab("about:blank", ContainerId::default_container());
+                                        app.open_tab(
+                                            "about:blank",
+                                            ContainerId::default_container(),
+                                        );
                                     }
                                 });
                                 if let Some(id) = select_id {
@@ -488,9 +542,8 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                 // engine boundary: the chrome never calls into
                                 // `servo` types here.
                                 let active = app.active_tab_id.clone();
-                                let snapshot = active
-                                    .as_ref()
-                                    .and_then(|id| app.engine.page_snapshot(id));
+                                let snapshot =
+                                    active.as_ref().and_then(|id| app.engine.page_snapshot(id));
                                 let (loading, can_back, can_fwd) = match &snapshot {
                                     Some(page) => (
                                         page.load_state.is_loading(),
@@ -517,7 +570,11 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                             app.engine.go_forward(active_id);
                                         }
                                         if ui
-                                            .add(if loading { icon_button("✕") } else { icon_button("⟳") })
+                                            .add(if loading {
+                                                icon_button("✕")
+                                            } else {
+                                                icon_button("⟳")
+                                            })
                                             .on_hover_text(if loading { "Stop" } else { "Reload" })
                                             .clicked()
                                         {
@@ -527,10 +584,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                                 app.engine.reload(active_id, false);
                                             }
                                         }
-                                        if ui
-                                            .add(icon_button("⌂"))
-                                            .on_hover_text("Home")
-                                            .clicked()
+                                        if ui.add(icon_button("⌂")).on_hover_text("Home").clicked()
                                         {
                                             app.navigate_tab(active_id, &webview_home.clone());
                                         }
@@ -554,14 +608,8 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {
                                                 if ui
-                                                    .label(
-                                                        egui::RichText::new(shield).size(15.0),
-                                                    )
-                                                    .on_hover_text(if protected_now {
-                                                        "Tracking protection ON (click to pause)"
-                                                    } else {
-                                                        "Tracking protection PAUSED (click to enable)"
-                                                    })
+                                                    .label(egui::RichText::new(shield).size(15.0))
+                                                    .on_hover_text(shield_tooltip(app))
                                                     .clicked()
                                                 {
                                                     app.set_adblock_enabled(!protected_now);
@@ -576,17 +624,18 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                                 // lose focus the same frame, so detect the commit via
                                                 // lost_focus, not has_focus.
                                                 let enter = resp.lost_focus()
-                                                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                                    && ui
+                                                        .input(|i| i.key_pressed(egui::Key::Enter));
                                                 if enter {
-                                                    let target = match OmniboxState::resolve_input(
-                                                        buffer,
-                                                    ) {
-                                                        OmniboxTarget::Url(u)
-                                                        | OmniboxTarget::Internal(u)
-                                                        | OmniboxTarget::Search {
-                                                            resolved_url: u, ..
-                                                        } => u,
-                                                    };
+                                                    let target =
+                                                        match OmniboxState::resolve_input(buffer) {
+                                                            OmniboxTarget::Url(u)
+                                                            | OmniboxTarget::Internal(u)
+                                                            | OmniboxTarget::Search {
+                                                                resolved_url: u,
+                                                                ..
+                                                            } => u,
+                                                        };
                                                     *buffer = target.clone();
                                                     // One path for the chrome model and the engine:
                                                     // the tab records the request, the engine loads
@@ -621,7 +670,9 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                             }
                                             let mc = app.media_hub.len();
                                             if mc > 0 {
-                                                ui.label(egui::RichText::new(mc.to_string()).weak());
+                                                ui.label(
+                                                    egui::RichText::new(mc.to_string()).weak(),
+                                                );
                                             }
                                         },
                                     );
@@ -642,8 +693,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                     ui.separator();
                                     if app.media_hub.is_empty() {
                                         ui.label(
-                                            egui::RichText::new("No media is playing.")
-                                                .weak(),
+                                            egui::RichText::new("No media is playing.").weak(),
                                         );
                                     } else {
                                         render_media_sessions(ui, app);
@@ -674,9 +724,8 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                             // draws over its own region. `from_bottom_px` matches
                             // surfman's bottom-left GL origin.
                             if let Some(render_to_parent) = off.render_to_parent_callback() {
-                                ui.ctx()
-                                    .layer_painter(egui::LayerId::background())
-                                    .add(egui::PaintCallback {
+                                ui.ctx().layer_painter(egui::LayerId::background()).add(
+                                    egui::PaintCallback {
                                         rect: content_rect,
                                         callback: Arc::new(egui_glow::CallbackFn::new(
                                             move |info, painter| {
@@ -694,7 +743,8 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                                 render_to_parent(painter.gl(), rect_in_parent);
                                             },
                                         )),
-                                    });
+                                    },
+                                );
                             }
                         }
 
@@ -711,7 +761,10 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                 .anchor(egui::Align2::RIGHT_TOP, [-12.0, 56.0])
                                 .show(ui.ctx(), |ui| {
                                     if ui.button("New Tab").clicked() {
-                                        app.open_tab("about:blank", ContainerId::default_container());
+                                        app.open_tab(
+                                            "about:blank",
+                                            ContainerId::default_container(),
+                                        );
                                         *menu_open = false;
                                     }
                                     if ui
@@ -752,6 +805,20 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                         app.set_adblock_enabled(on);
                                         *menu_open = false;
                                     }
+                                    // The shield is a claim, so the menu shows
+                                    // what is behind it: compiled rules and real
+                                    // blocks this session, both read from the
+                                    // engine's request hook.
+                                    ui.separator();
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} rules loaded, {} requests blocked",
+                                            app.filter_rule_count(),
+                                            app.blocked_requests()
+                                        ))
+                                        .weak()
+                                        .size(12.0),
+                                    );
                                     if ui.button("Close").clicked() {
                                         *menu_open = false;
                                     }
@@ -853,6 +920,22 @@ impl BrowserWindowApp {
             _ => {}
         }
     }
+}
+
+/// The address-bar shield tooltip. It reports the numbers behind the claim
+/// instead of asserting protection: rules compiled at startup and requests the
+/// engine's resource hook has refused this session.
+fn shield_tooltip(app: &BrowserApp) -> String {
+    let state = if app.adblock_enabled() {
+        "ON"
+    } else {
+        "PAUSED (click to enable)"
+    };
+    format!(
+        "Tracking protection {state} - {} rules, {} requests blocked this session",
+        app.filter_rule_count(),
+        app.blocked_requests()
+    )
 }
 
 fn format_ms(ms: u64) -> String {

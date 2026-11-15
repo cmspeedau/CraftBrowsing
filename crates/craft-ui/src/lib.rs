@@ -1,6 +1,7 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
 pub mod omnibox;
+pub mod shields;
 pub mod tab_manager;
 pub mod window;
 
@@ -14,11 +15,15 @@ use std::sync::Arc;
 use tracing::info;
 
 pub use omnibox::{OmniboxState, OmniboxTarget};
+pub use shields::ShieldStats;
 pub use tab_manager::{TabNode, TabState, VerticalTabManager};
 pub use window::{BrowserWindowApp, run_window_event_loop};
 
 pub struct BrowserApp {
     pub adblock: Arc<AdblockManager>,
+    /// Requests refused by a filter rule this session. The engine delegate
+    /// records into it; the chrome reads from it.
+    pub shields: Arc<ShieldStats>,
     pub sync_preferences: SyncPreferences,
     pub tabs: Vec<Tab>,
     pub active_tab_id: Option<TabId>,
@@ -43,6 +48,7 @@ impl BrowserApp {
         // thread boundary in the current shell.
         #[allow(clippy::arc_with_non_send_sync)]
         let adblock = Arc::new(AdblockManager::new());
+        let shields = ShieldStats::new();
         let sync_preferences = SyncPreferences::default();
         let omnibox = OmniboxState::new("", ContainerId::default_container());
         let tab_manager = VerticalTabManager::new();
@@ -99,6 +105,7 @@ impl BrowserApp {
 
         Self {
             adblock,
+            shields,
             sync_preferences,
             tabs: Vec::new(),
             active_tab_id: None,
@@ -143,6 +150,17 @@ impl BrowserApp {
 
     pub fn set_adblock_enabled(&mut self, enabled: bool) {
         self.adblock.set_enabled(enabled);
+    }
+
+    /// How many rules the matcher has compiled. Shown in the menu so the shield
+    /// is not a claim without a number behind it.
+    pub fn filter_rule_count(&self) -> usize {
+        self.adblock.rule_count()
+    }
+
+    /// Requests refused by a filter rule during this session.
+    pub fn blocked_requests(&self) -> u64 {
+        self.shields.blocked()
     }
 
     pub fn open_tab(&mut self, url: &str, container_id: ContainerId) -> TabId {

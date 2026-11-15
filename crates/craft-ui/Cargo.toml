@@ -8,6 +8,7 @@ craft-core = { path = "../craft-core" }
 craft-engine = { path = "../craft-engine", features = ["servo"] }
 craft-adblock = { path = "../craft-adblock" }
 craft-sync = { path = "../craft-sync" }
+content-security-policy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
