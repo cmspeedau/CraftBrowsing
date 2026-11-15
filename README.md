@@ -1,6 +1,6 @@
 # CraftBrowsing
 
-A modern, privacy-focused web browser with native adblocking, multi-account container tabs, and a local-first sync engine. It is written in Rust, including the UI and every subsystem.
+A modern, privacy-focused web browser with native adblocking, multi-account container tabs, and a local-first sync engine. Everything above the rendering engine is Rust: the chrome, tabs, storage, filtering, transfers and sync.
 
 CraftBrowsing renders on the [Servo](https://servo.org/) engine today. We have decided to adopt Blink/Chromium (via CEF) as the primary engine for broad real-world site compatibility, keeping the Rust chrome and all subsystems unchanged. See [docs/engine-decision.md](docs/engine-decision.md) for the rationale, the reversible engine-abstraction plan, and the scheduled re-evaluation of Servo. The engine swap is a planned phase; Servo is still the only backend that exists, reached through the `Engine` / `PageController` boundary in `craft-engine`.
 
@@ -34,10 +34,10 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 
 - **Rust application layer, swappable engine:** Everything above the engine (UI, tabs, storage, adblock, sync, transfers) is Rust behind an engine abstraction. Servo runs it today; Blink/Chromium (CEF) is the adopted target for real-world site compatibility, with scheduled Servo re-evaluation ([docs/engine-decision.md](docs/engine-decision.md)).
 - **Cross-Platform Releases & Auto-Update:** Native builds for Windows (with silent background auto-updates), macOS (universal notarized `.dmg` with in-app updater), and Linux (**AppImage with `zsync` delta updates**).
-- **Native Ad & Tracker Blocking:** `adblock-rust` network matching enforced in the engine's request hook, with an address-bar shield toggle and a bundled curated ruleset. Per-site controls, downloaded lists and element hiding are pending (`docs/tracking-protection.md`).
+- **Native Ad & Tracker Blocking:** `adblock-rust` network matching enforced in the engine's request hook, with an address-bar shield toggle. A curated list ships in the binary, and EasyList, EasyPrivacy and uBlock filters download on demand from the menu (never automatically) and are cached for later starts. Element hiding, per-site controls and per-list toggles are pending (`docs/tracking-protection.md`).
 - **Inbuilt Containers:** Firefox-style contextual identities are bound to tabs and colored in the chrome, and `craft-storage` implements partitioned jars and origin storage. Engine-level isolation is not wired yet, so containers do not yet separate cookies or sessions (`docs/containers.md`).
-- **Tab Groups & Vertical Tabs:** Color-coded collapsible groups, container auto-binding, and idle memory hibernation (`docs/tabs-and-groups.md`).
-- **Global Media Hub & PiP Scrubber:** Central toolbar popup for background media playback with timeline scrubbers and mute toggles (`docs/media-hub.md`).
+- **Tab Groups & Vertical Tabs:** A tree-style vertical tab manager with container accents and collapse/hibernate support in the chrome model. Only tabs and container binding are reachable in the running browser; grouping and idle hibernation have no UI path yet (`docs/tabs-and-groups.md`, `docs/roadmap.md`).
+- **Global Media Hub & PiP Scrubber:** A toolbar popup with transport controls exists, but no media sessions reach it yet: the engine's media-session callback is not wired, so the panel reads "No media is playing" (`docs/media-hub.md`).
 - **Local RSS/Atom Feed Reader (`craft://feeds`):** In-browser feed subscription, full-text offline caching, zero cloud dependencies (`docs/rss-reader.md`).
 - **Encrypted Vault Export & Portable Mode:** Password-encrypted `.craftvault` export (ChaCha20-Poly1305) and zero-footprint `--portable` execution from USB drives (`docs/backup-and-portability.md`).
 - **Progressive Web Apps (PWAs):** Install web apps into standalone, chromeless windows with native OS shortcuts, full adblocking, and container isolation.

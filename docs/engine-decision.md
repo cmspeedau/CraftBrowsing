@@ -93,8 +93,12 @@ Neutral for now:
    interception). Done on the Servo side (2026-11-15):
    `WebViewDelegate::load_web_resource` in `craft-ui::window` cancels matched
    subresource loads and the decision half lives in `craft-adblock`, which has no
-   engine dependency, so the CEF port is the hook only. Neither backend applies
-   cosmetic rules yet. See `docs/tracking-protection.md`.
+   engine dependency, so the CEF port is the hook only. Rule sources are also
+   engine-independent now: the bundled list plus the cached upstream lists
+   (EasyList, EasyPrivacy, uBlock filters, fetched only on a user action) arrive
+   through `craft_adblock::upstream`, and only the request hook has to be reborn
+   per backend. Neither backend applies cosmetic rules yet. See
+   `docs/tracking-protection.md`.
 5. Update the three packaging targets to bundle CEF.
 6. Keep the Servo `PageController` impl in-tree; it is what the re-evaluation
    flips back to.
