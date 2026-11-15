@@ -1,0 +1,5 @@
+# Keep distilled summaries/relevant evidence; ignore large run logs.
+*.log
+build.log
+mach-help.txt
+relevant-flags.txt

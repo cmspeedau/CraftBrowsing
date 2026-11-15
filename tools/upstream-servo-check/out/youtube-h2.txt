@@ -1,0 +1,2 @@
+[2026-11-14T23:17:10Z WARN  net::http_loader] network error: hyper_util::client::legacy::Error(SendRequest, hyper::Error(Http2, Error { kind: Reset(StreamId(1), PROTOCOL_ERROR, Library) }))
+[2026-11-14T23:17:10Z WARN  script::event_loop::script_thread] Network error: HTTP failure: client error (SendRequest)

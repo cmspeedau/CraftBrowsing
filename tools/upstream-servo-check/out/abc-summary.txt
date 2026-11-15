@@ -1,0 +1,14 @@
+(new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+[2026-11-14T23:20:13Z ERROR servoshell::desktop::headed_window] (new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+(new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+[2026-11-14T23:20:13Z ERROR servoshell::desktop::headed_window] (new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+A client-side exception has occurred, see here for more info: https://nextjs.org/docs/messages/client-side-exception-occurred
+[2026-11-14T23:20:13Z ERROR servoshell::desktop::headed_window] A client-side exception has occurred, see here for more info: https://nextjs.org/docs/messages/client-side-exception-occurred
+(new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+[2026-11-14T23:20:13Z ERROR servoshell::desktop::headed_window] (new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+(new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+[2026-11-14T23:20:13Z ERROR servoshell::desktop::headed_window] (new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+(new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+[2026-11-14T23:20:13Z ERROR servoshell::desktop::headed_window] (new ReferenceError("IntersectionObserver is not defined", "https://www.abc.net.au/news-web/_next/static/chunks/pages/_app-388fda864be72f2b.js?dpl=39d3b5a0", 1))
+A client-side exception has occurred, see here for more info: https://nextjs.org/docs/messages/client-side-exception-occurred
+[2026-11-14T23:20:13Z ERROR servoshell::desktop::headed_window] A client-side exception has occurred, see here for more info: https://nextjs.org/docs/messages/client-side-exception-occurred

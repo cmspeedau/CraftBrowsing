@@ -1,0 +1,2 @@
+[io-probe] IntersectionObserver is not usable: typeof window.IntersectionObserver = undefined | 'IntersectionObserver' in window = false | THREW: ReferenceError: IntersectionObserver is not defined | DISPOSITION: BROKEN
+[2026-11-14T23:18:39Z ERROR servoshell::desktop::headed_window] [io-probe] IntersectionObserver is not usable: typeof window.IntersectionObserver = undefined | 'IntersectionObserver' in window = false | THREW: ReferenceError: IntersectionObserver is not defined | DISPOSITION: BROKEN
