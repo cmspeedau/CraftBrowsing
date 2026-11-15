@@ -1,8 +1,10 @@
 # CraftBrowsing
 
-A modern, privacy-focused, pure-Rust web browser built on top of the [Servo](https://servo.org/) rendering engine.
+A modern, privacy-focused web browser with native adblocking, multi-account container tabs, and a local-first sync engine. It is written in Rust, including the UI and every subsystem.
 
-CraftBrowsing is designed for users who want total independence from Chromium and Gecko, with native adblocking, multi-account container tabs, progressive web app (PWA) support, a built-in download manager, customizable UI theming, developer tools, hardware flashing access (WebSerial/WebUSB), vertical tabs & tab grouping, local RSS reader, encrypted portable vault backups, global media controls with PiP scrubber, and an optional, zero-knowledge local sync engine.
+CraftBrowsing is rendering on the [Servo](https://servo.org/) engine today. We have decided to adopt Blink/Chromium (via CEF) as the primary engine for broad real-world site compatibility, keeping the Rust chrome and all subsystems unchanged. See [docs/engine-decision.md](docs/engine-decision.md) for the rationale, the reversible engine-abstraction plan, and the scheduled re-evaluation of Servo. The engine swap is a planned phase; `craft-engine` still embeds Servo until that lands.
+
+Feature set: native adblocking, multi-account container tabs, progressive web app (PWA) support, a built-in download manager, customizable UI theming, developer tools, hardware flashing access (WebSerial/WebUSB), vertical tabs & tab grouping, local RSS reader, encrypted portable vault backups, global media controls with PiP scrubber, and an optional, zero-knowledge local sync engine.
 
 ---
 
@@ -12,7 +14,7 @@ In CraftBrowsing, security and privacy are not optional secondary features—the
 
 - **User Sovereignty & Granular Toggles (`craft://settings/privacy`):** Every single privacy protection (ad/tracker blocking, anti-fingerprinting, HTTPS-Only, DoH, containers, hardware device access) can be individually toggled on/off globally or overridden on a per-site / per-container basis.
 - **Zero-Telemetry & Local Defaults:** No phone-home diagnostics, metrics, or default network probes.
-- **Pure-Rust Memory Safety:** Rendered via Servo and WebRender, eliminating entire classes of memory safety bugs (use-after-free, buffer overflows).
+- **Memory Safety and Sandboxing:** Application and subsystems are written in Rust; rendering runs in the engine's own sandboxed process. (Note: the planned Blink/Chromium engine is C++; the Rust boundary is the chrome and subsystems. See [docs/engine-decision.md](docs/engine-decision.md).)
 - **Process Isolation & OS Sandboxing:** Worker threads, rendering surfaces, and extension runtimes operate in isolated sandboxes.
 - **Configurable Anti-Fingerprinting:** Standardized canvas readback noise, WebGL uniform blunting, AudioContext jitter, and user-agent normalization (all with user disable options for web app compatibility).
 - **HTTPS-First & Encrypted DNS:** Strict HTTPS enforcement with configurable DNS-over-HTTPS (DoH) / DNS-over-TLS (DoT) and custom resolver support.
@@ -25,7 +27,7 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 
 ## Key Highlights
 
-- **Pure Rust Engine:** Powered by Servo and WebRender for fast, memory-safe layout and parallel rendering.
+- **Rust application layer, swappable engine:** Everything above the engine (UI, tabs, storage, adblock, sync, transfers) is Rust behind an engine abstraction. Servo runs it today; Blink/Chromium (CEF) is the adopted target for real-world site compatibility, with scheduled Servo re-evaluation ([docs/engine-decision.md](docs/engine-decision.md)).
 - **Cross-Platform Releases & Auto-Update:** Native builds for Windows (with silent background auto-updates), macOS (universal notarized `.dmg` with in-app updater), and Linux (**AppImage with `zsync` delta updates**).
 - **Native Ad & Tracker Blocking:** Integrated filter-list parsing via `adblock-rust` running directly in the network pipeline (with per-site shield toggle).
 - **Inbuilt Containers:** Firefox-style contextual identities isolating cookies, storage, and sessions per tab.
@@ -62,6 +64,7 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 - [Plugin System & Extensions](docs/plugin-system.md)
 - [Passwords & External Manager Integration](docs/passwords.md)
 - [Web Compatibility Gaps (Servo engine)](docs/webcompat.md)
+- [Engine Decision: Blink/Chromium (CEF), keep Servo re-evaluable](docs/engine-decision.md)
 - [Making Submissions Easy to Read](docs/making-submissions.md)
 
 ---

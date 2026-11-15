@@ -4,7 +4,7 @@ Guidance for AI coding agents (and human contributors) working on CraftBrowsing.
 
 ## Project
 
-CraftBrowsing is a privacy-first, pure-Rust web browser built on the Servo rendering engine. It targets Windows, macOS, and Linux (AppImage with `zsync` delta updates) and ships adblocking, containers, tab groups, a transfer engine, sync (off by default), extensions, and a Rust workspace split by subsystem.
+CraftBrowsing is a privacy-first web browser with a Rust application layer (UI, tabs, storage, adblock, sync, transfers, extensions). Engine today is Servo. We have decided to adopt Blink/Chromium (via CEF) as the primary engine for real-world site compatibility, behind an engine abstraction so Servo stays a tracked, re-evaluable backend; the swap is a planned phase, not yet done. Rationale and the re-evaluation schedule (monthly release boundary, next realistic Jan/Feb) are in [docs/engine-decision.md](docs/engine-decision.md); a CI job watches servo/servo releases and gap issues and prompts re-evaluation. It targets Windows, macOS, and Linux (AppImage with `zsync` delta updates). The old "pure-Rust browser built on Servo" positioning is retired; engine changes need explicit approval.
 
 The roadmap is the scope authority. The code and `Cargo.toml` files are the truth for what actually exists; some docs still describe planned crates.
 
@@ -16,6 +16,7 @@ Load the matching skill with the `skill` tool before starting the work, not afte
 | --- | --- |
 | Any Rust change | `rust` |
 | Servo embedding, rendering contexts, winit event loop, delegates, content processes (`craft-engine`) | `servo-engine-integration` (plus `rust`) |
+| Engine abstraction boundary, Blink/Chromium (CEF) backend, packaging, and the scheduled Servo re-evaluation (`craft-engine`, `.github/workflows/servo-watch.yml`) | `rust`, `docker`, `github-actions`; read `docs/engine-decision.md` first; the engine swap needs a separate explicit go |
 | Tests, benchmarks, proptest, coverage | `rust-testing` |
 | Browser chrome, settings pages, dialogs, themes, any visual surface in `craft-ui` | `antislop` first, then `antislop-ui`, `antislop-human`, `antislop-layoutmobile`, `antislop-copywriting`, `antislop-code` |
 | Transfer engine, segmented HTTP, resume, torrent plumbing (`craft-transfers`) | `bounded-transfer-workers` |
@@ -43,7 +44,7 @@ Load the matching skill with the `skill` tool before starting the work, not afte
 | Crate | Purpose |
 | --- | --- |
 | `craft-core` | Shared types: tabs and groups, containers, downloads, permissions |
-| `craft-engine` | Servo embedding, request pipeline, compositor and events |
+| `craft-engine` | Engine abstraction boundary: embeds Servo today, request pipeline, compositor and events. The Blink/CEF backend and the trait boundary are the planned next phase |
 | `craft-ui` | Browser chrome: window, omnibox, tab manager, settings surface |
 | `craft-storage` | SQLite layer: containers, downloads, permissions, privacy settings |
 | `craft-adblock` | Filter-list parsing and request matching |

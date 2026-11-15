@@ -58,7 +58,7 @@ To prevent single-compromise vulnerabilities and side-channel data exfiltration:
 ```
 
 1. **Process Sandboxing:** Renderers run with restricted privilege rings (seccomp on Linux, AppContainer on Windows, sandbox seatbelt on macOS).
-2. **Memory Safety by Construction:** Render tree calculation, style cascades, HTML parsing, and networking run in pure Rust without raw C/C++ pointer arithmetic vulnerabilities.
+2. **Memory Safety by Construction (application layer):** Chrome, storage, adblock, sync, transfers, and parsing we own are Rust, without raw C/C++ pointer arithmetic. Today the render/style/HTML-parse path is Servo (also Rust). If the accepted move to Blink/Chromium lands, that engine path becomes C++ and is then protected by process sandboxing (item 1) and upstream patching rather than by construction; this is a documented consequence, see `docs/engine-decision.md`.
 3. **Container Context Partitioning:** Every HTTP request dispatched through `reqwest` inherits the tab's container cookie jar and connection pool. Connections across different containers never reuse TLS session tickets or HTTP/2 multiplexed streams, preventing cross-container connection correlation.
 4. **User Override for Performance or Legacy Support:** Users can adjust process limits or disable strict site isolation on constrained devices via advanced flags.
 

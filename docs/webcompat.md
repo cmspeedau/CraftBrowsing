@@ -1,10 +1,11 @@
-# Web Compatibility Gaps (Servo 0.8.0)
+# Web Compatibility Gaps (Servo)
 
-Tracking note for real-world site breakage observed with the Servo 0.8.0 engine.
-This is a browser-engine coverage list, not our `craft-*` code. We do not
-polyfill missing Web APIs in the embedder, because that would misreport support
-to every other site. This file is a watchlist to re-check as Servo lands
-features.
+Tracking note for real-world site breakage observed with Servo, on both the pinned
+0.8.0 and current `main`. This is a browser-engine coverage list, not our `craft-*`
+code. We do not polyfill missing Web APIs in the embedder, because that would
+misreport support to every other site. It is a watchlist to re-check as Servo lands
+features. See `docs/engine-decision.md` for the decision to move the primary engine to
+Blink/Chromium (CEF) while keeping Servo re-evaluable.
 
 ## Method / evidence source
 
@@ -20,16 +21,41 @@ missing on those pages, not a verified per-property implementation status. For a
 ground-truth list, cross-check against the Servo web-platform features dashboard
 before acting on any single property.
 
+## Upstream status (verified against Servo `main`)
+
+Method: built Servo `main` in a container (`tools/upstream-servo-check`) and ran
+headless, headed-for-console checks. Results are captured in
+`tools/upstream-servo-check/out/`. Date: 2026-11-14, latest release v0.8.0.
+
+- `IntersectionObserver`: still broken on `main`. Fixture reports
+  `typeof window.IntersectionObserver = undefined`, `in window = false`,
+  `THREW: ReferenceError ... DISPOSITION: BROKEN`; ABC News still hits its
+  client-side exception. Upstream tracking #35767 open. Not fixed by a version bump.
+- HTTP/2 on Google: still fails on `main`. `www.youtube.com` navigation reproduces
+  `Reset(StreamId(1), PROTOCOL_ERROR, Library)` (client-initiated). Open upstream:
+  #49396 (YouTube intermittent), #39785 (Gemini, Android). No conformance fix merged;
+  recent h2 changes are only a dependency bump (#48917) and a timer (#48657), and our
+  lock file already has the same h2 0.4.20. So a newer baseline is unlikely to help.
+- Cadence: Servo releases are roughly monthly (0.4 to 0.8 spanned Aug to Nov 2026).
+  The maturity needed for a general browser is not one or two fixes away, which is the
+  input to the engine decision (see `docs/engine-decision.md` and the `servo-watch` CI job).
+
 ## Load-breaking (high confidence)
 
-- `IntersectionObserver` not implemented.
+- `IntersectionObserver` present in the code but not reachable from web JS.
   - Symptom: `ReferenceError: IntersectionObserver is not defined` in the page
     console, then Next.js renders "Application error: a client-side exception has
     occurred" for `www.abc.net.au`. The document itself loaded fine (HTTP 200);
     the app threw during hydration.
+  - Code state: `components/script/dom/intersectionobserver/` exists with a real
+    `Constructor`, but is not installed on the window global.
+  - Verified on `main` (container build, 2026-11-14): still `undefined`, fixture and
+    ABC both still throw. So this is not fixed by "waiting for a baseline"; see the
+    Upstream status section.
   - Impact: hard. Any site that constructs an `IntersectionObserver` unconditionally
     breaks. Common for lazy-loading and infinite-scroll UIs.
-  - Action: upstream. Re-test when Servo ships `IntersectionObserver`.
+  - Action: track upstream (IO tracking issue #35767). Re-test each release via
+    `tools/upstream-servo-check`.
 
 ## Selector engine failures
 
@@ -96,9 +122,12 @@ before prioritizing.
     way to force HTTP/1.1 from `craft-*`. A workaround would require vendoring or
     patching `servo-net` to disable HTTP/2 (drop `.enable_http2()`), which is not
     something to do lightly.
-  - Action: upstream. This is a Servo/rustls/h2 conformance issue against Google's
-    h2 servers. Repro steps: load `youtube.com` (and `www.google.com`) with
-    `RUST_LOG=info` and grep `PROTOCOL_ERROR`.
+  - Action: upstream. Reproduced on `main` (2026-11-14, see Upstream status above),
+    so it is not a pinned-version-only bug. This is a Servo/rustls/h2 conformance
+    issue against Google's h2 servers. For the report, the verified-good comparator is
+    curl/libcurl against the same URL: if curl negotiates h2 and 200s where our client
+    self-resets, that contrast is the evidence. Repro: load `youtube.com` (and
+    `www.google.com`) with `RUST_LOG=info` and grep `PROTOCOL_ERROR`.
 
 ## Per-site summary
 
