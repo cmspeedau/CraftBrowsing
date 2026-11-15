@@ -468,6 +468,20 @@ mod tests {
         assert!(tracker_script());
     }
 
+    /// The GPT tag loader is the root of a large part of Google's ad traffic: a
+    /// paired run on a news page showed the bundled list letting `gpt.js` through,
+    /// which then produced eight doubleclick requests that had to be refused one
+    /// by one. Blocking the root keeps the fan-out from ever being attempted.
+    #[test]
+    fn the_bundled_rules_block_the_ad_tag_loader_at_the_root() {
+        let manager = AdblockManager::new();
+        assert!(manager.check_network_request(
+            "https://www.googletagservices.com/tag/js/gpt.js",
+            "https://news.example.org/article",
+            SCRIPT,
+        ));
+    }
+
     #[test]
     fn first_party_and_unlisted_requests_pass() {
         let manager = AdblockManager::new();

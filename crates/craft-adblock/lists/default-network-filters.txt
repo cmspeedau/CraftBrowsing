@@ -16,6 +16,7 @@
 ||doubleclick.net^
 ||googlesyndication.com^
 ||googleadservices.com^
+||googletagservices.com^
 ||adservice.google.com^
 ||google-analytics.com^
 ||analytics.google.com^
