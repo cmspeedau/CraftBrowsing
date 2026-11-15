@@ -1,0 +1,87 @@
+! CraftBrowsing default network filter rules.
+!
+! Scope: network filters only. Element hiding and other cosmetic filters are not
+! applied by the browser yet, so nothing cosmetic belongs in this file.
+!
+! These are curated endpoints, not a redistribution of a third-party list. A
+! subscription updater (EasyList / EasyPrivacy / uBlock filters, with cached
+! downloads the user triggers) is a separate roadmap item; until then this file
+! is the whole ruleset and `craft-adblock` reports how many rules it compiled.
+!
+! Login and share widgets are deliberately left alone: connect.facebook.net,
+! accounts.google.com, recaptcha and Turnstile endpoints are functional, so they
+! are not listed here.
+
+! Google advertising and measurement endpoints
+||doubleclick.net^
+||googlesyndication.com^
+||googleadservices.com^
+||adservice.google.com^
+||google-analytics.com^
+||analytics.google.com^
+||googletagmanager.com/gtag/js
+||googletagmanager.com/gtm/js
+
+! Meta advertising endpoints (pixel and ad delivery, not the login SDK)
+||facebook.com/tr?
+||an.facebook.com^
+||adx.com^
+
+! Amazon advertising
+||amazon-adsystem.com^
+||fls-na.amazon.com^
+
+! Exchanges, SSPs and demand platforms
+||adnxs.com^
+||pubmatic.com^
+||rubiconproject.com^
+||openx.net^
+||casalemedia.com^
+||smartadserver.com^
+||criteo.com^
+||criteo.net^
+||taboola.com^
+||outbrain.com^
+||yieldmo.com^
+||adform.net^
+||sharethrough.com^
+||mediamath.com^
+||moatads.com^
+||adsafeprotected.com^
+||innovid.com^
+||springserve.com^
+
+! Analytics and session recording
+||scorecardresearch.com^
+||quantserve.com^
+||chartbeat.com^
+||chartbeat.net^
+||segment.io^
+||segment.com^
+||mixpanel.com^
+||amplitude.com^
+||hotjar.com^
+||fullstory.com^
+
+! Common tracking beacons on other hosts
+||mouseflow.com^
+||crazyegg.com^
+||clicktale.net^
+||kissmetrics.io^
+||branch.io^
+||appsflyer.com^
+||adjust.com^
+||tealium.com^
+||ensighten.com^
+||adsrvr.org^
+||adobedtm.com^
+||demdex.net^
+||rlcdn.com^
+||liveintent.com^
+||sonobi.com^
+||disqusads.com^
+
+! Exceptions: first-party content and functional endpoints that a broad rule
+! above would otherwise catch.
+@@||analytics.google.com/ga-dev^
+@@||www.google.com/s2/favicons
