@@ -885,6 +885,11 @@ mod tests {
         // Only "active" stays active (insert_tab marks each new tab active; reset manually)
         if let Some(n) = manager.get_node_mut(&TabId("active".into())) {
             n.is_active = true;
+            // Keep the manager's own invariant: a tab flagged active is in the
+            // Active state. Setting the flag alone would leave the node in the
+            // state every background tab has, and the assertion below would be
+            // checking the test's setup rather than the discard policy.
+            n.state = TabState::Active;
         }
         for id in ["fresh", "stale", "pinned"] {
             if let Some(n) = manager.get_node_mut(&TabId(id.into())) {
