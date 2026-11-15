@@ -17,7 +17,7 @@ In CraftBrowsing, security and privacy are not optional secondary features—the
 > [tracking protection status](docs/tracking-protection.md), and the roadmap's
 > integration status note (`docs/roadmap.md`) for what is still crate-level only.
 
-- **User Sovereignty & Granular Toggles (`craft://settings/privacy`):** Every single privacy protection (ad/tracker blocking, anti-fingerprinting, HTTPS-Only, DoH, containers, hardware device access) can be individually toggled on/off globally or overridden on a per-site / per-container basis.
+- **User Sovereignty & Granular Toggles (design goal):** Every privacy protection is intended to be individually toggleable globally and overridable per site or container. Today that is true of tracking protection only: a global shield toggle, a per-site pause, and a user-triggered filter list update, all reported on `craft://settings` and `craft://shields`. Anti-fingerprinting, HTTPS-Only, DoH and per-container overrides remain design.
 - **Zero-Telemetry & Local Defaults:** No phone-home diagnostics, metrics, or default network probes.
 - **Memory Safety and Sandboxing:** Application and subsystems are written in Rust; rendering runs in the engine's own sandboxed process. (Note: the planned Blink/Chromium engine is C++; the Rust boundary is the chrome and subsystems. See [docs/engine-decision.md](docs/engine-decision.md).)
 - **Process Isolation & OS Sandboxing:** Worker threads, rendering surfaces, and extension runtimes operate in isolated sandboxes.
@@ -70,6 +70,7 @@ For full architectural details and the settings matrix, see [docs/security-and-p
 - [Passwords & External Manager Integration](docs/passwords.md)
 - [Web Compatibility Gaps (Servo engine)](docs/webcompat.md)
 - [Tracking Protection: What Runs Today](docs/tracking-protection.md)
+- [Internal Pages (`craft://`)](docs/internal-pages.md)
 - [Engine Decision: Blink/Chromium (CEF), keep Servo re-evaluable](docs/engine-decision.md)
 - [Making Submissions Easy to Read](docs/making-submissions.md)
 

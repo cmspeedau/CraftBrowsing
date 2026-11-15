@@ -24,9 +24,11 @@ CraftBrowsing is a next-generation, highly customizable web browser with a Rust 
 > Six Phase 1 items are ticked for work that exists in a crate or in the chrome
 > model but is **not reachable in the running browser yet**, checked by call
 > sites on 2026-11-15: the download manager (no download path in `craft-ui`), the
-> site permissions prompt manager (none in `craft-ui`), the `craft://settings/*`
-> privacy dashboard (no internal pages are registered, so those URLs fail to
-> load), session restore and tab hibernation/discarding (`hibernate_tab`,
+> site permissions prompt manager (none in `craft-ui`), the granular privacy
+> dashboard (only `craft://welcome`, `craft://shields` and `craft://settings`
+> exist, and the last is an inventory rather than a set of controls, so
+> `craft://settings/privacy` and friends still resolve to our own 404 page),
+> session restore and tab hibernation/discarding (`hibernate_tab`,
 > `discard_idle_tabs`, `serialize_session`/`restore_session` have no caller), tab
 > grouping (`nest_tab`/`toggle_collapse` have no caller), and ephemeral private
 > browsing (no profile selection in the shell). Each needs its wiring item before
@@ -56,12 +58,14 @@ CraftBrowsing is a next-generation, highly customizable web browser with a Rust 
 - [x] Load real filter lists from upstream (EasyList, EasyPrivacy, uBlock filters) with user-triggered updates and a local cache. (Done 2026-11-15: the overflow menu's "Update filter lists now" fetches over rustls HTTPS on a worker thread, validates and caches each list under the platform data directory, and later starts read that cache with no network traffic. One deliberate run installed 137,795 upstream rules beside the bundled curated ones and reported the 3,165 lines the parser refused. Nothing fetches on its own, so the no-default-network-calls invariant holds and a first run is bundled-rules-only until the button is pressed. See `docs/tracking-protection.md`.)
 - [ ] Apply cosmetic and element-hiding rules. (`adblock-rust` parses them into the engine, and the upstream lists carry roughly 28,000 of them, but nothing delivers `get_cosmetic_styles` results to the page, so a `$elemhide` or `###selector` rule is inert. In practice much of EasyList's value is in those rules, so this is the largest remaining gap.)
 - [ ] Per-list controls and staleness warning. Nothing disables one list, imports a custom list, or warns when a cached list has gone stale: the lists declare `! Expires: 4 days` and the browser neither reads nor stores that, so a month-old cache is served silently.
-- [ ] Per-site shield controls in the settings surface. (`add_site_exception` and `remove_site_exception` exist and are tested, and the matcher honors them, but the chrome only toggles protection globally because internal pages such as `craft://settings/shields` are not registered with the engine.)
+- [x] Per-site shield controls. (Done 2026-11-15: the menu pauses and resumes protection for the site in the active tab, the address-bar shield reports that state, and `craft://shields` lists the paused sites. Exceptions match by host or subdomain suffix, replacing a substring test that let an exception for `example.com` silence protection on `notexample.com` and on any URL merely mentioning the string.)
+- [x] Serve internal pages on the `craft://` scheme. (Done 2026-11-15: `craft://welcome` (new-tab start page), `craft://shields` (protection status) and `craft://settings` (what works and what does not), with a 404 that lists them. Served by a protocol handler with `Content-Security-Policy: default-src 'none'`, rendering only escaped data, and no script or subresource path at all. See `docs/internal-pages.md`.)
+- [ ] Per-site and per-container permission prompts, and shield controls finer than pause-everything-for-this-host. (The matcher takes a host exception only; there is no camera/microphone/notification/clipboard prompt manager anywhere in the running browser, and no per-container override.)
 - [ ] Firefox-style Multi-Account Containers (`UserContextId` cookie jar, cache, and storage partitioning). (Partly built as of 2026-11-15: container identities with colors/icons exist in the chrome, `craft-storage` implements partitioned cookie jars, origin storage and cache keyed by `container_id` and purges with the container, but the browser does not use `craft-storage` and Servo runs with `temporary_storage: true` on a single shared `WebView`, so nothing is partitioned per container yet. Needs per-container page handles, which arrive with the per-tab surfaces of Phase 2b.)
 - [x] Container-aware tab model: each tab and engine record carries its `ContainerId`, and container-scoped new-tab actions in the chrome pass the real id (`craft-engine::TabRecord.container_id`).
 - [x] Containerized Download Manager with HTTP Range pause/resume and streaming `.part` writes (`docs/downloads.md`).
 - [x] Unified Site Permissions prompt manager (camera, mic, notifications, clipboard).
-- [x] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls.
+- [ ] Privacy & Security Settings dashboard (`craft://settings/privacy`) with granular enable/disable controls. (Not built. What exists is `craft://settings`, a read-only inventory of what is and is not implemented, plus three working controls: the global shield toggle, the per-site pause, and the filter list update. Everything else named in `docs/security-and-privacy.md` (HTTPS-Only, DoH/DoT, ECH, anti-fingerprinting, per-container overrides) has no implementation in the workspace.)
 - [x] CI/CD release matrix for Windows (`.exe`/`.msix`), macOS (`.dmg`), and Linux AppImage with `zsync` (`docs/releases-and-packaging.md`).
 
 ### v0.2.0 — Phase 2: Developer Tools, Media Hub, PWAs & Hardware Flashing

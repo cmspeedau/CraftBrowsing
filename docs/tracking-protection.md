@@ -97,11 +97,11 @@ moment the user asked for an update.
   browser neither reads nor stores that, so a cache from last month is served
   with no warning. The stored `fetched_at_unix` is the only age information, and
   the menu shows it as "3 d ago" without judging it.
-- **Per-list controls.** `remove_group` exists for the engine side, but there is
-  no UI to disable one list, and no custom-list import.
-- **Per-site shield UI.** `add_site_exception` and `remove_site_exception` exist
-  and are tested, but the chrome only toggles globally, because internal pages
-  (`craft://settings/shields`) are not registered with the engine.
+- **Per-list controls.** `remove_group` exists on the engine side, but there is no
+  UI to disable one list, and no custom-list import.
+- **Fine-grained per-site control.** There is a per-site pause (the menu, reported
+  on the shield and on `craft://shields`), but it is all-or-nothing for the host:
+  no allowing one tracker while blocking another, and no per-container override.
 - **Parameter stripping and CNAME uncloaking.** Design text in
   `docs/security-and-privacy.md`, no implementation.
 
@@ -140,9 +140,9 @@ Two other things the run showed, both worth keeping in mind:
   (`*.token.awswaf.com`); this page made eight such requests and all eight were
   refused. The document still reached `Complete` and its assets still loaded, so
   on this site it cost nothing visible, but a WAF that insists on that token
-  would challenge or block the visitor. That is precisely the case a
-  per-site "pause on this site" control exists to serve, and the chrome only has
-  a global toggle until internal pages are registered.
+  would challenge or block the visitor. The per-site pause exists for exactly
+  that case, which is also why it is reported in three places (menu label, shield
+  tooltip, `craft://shields`) instead of being invisible state.
 
 ## Verifying it
 
@@ -151,6 +151,15 @@ RUST_LOG=info cargo run -p craft-ui
 # startup:  shields: 60 bundled network rules compiled (0 rejected)
 # with cache: shields: loaded 3 cached filter lists, ... rules total
 # per block: shields: blocked script request to https://...
+# per-site:  shields: protection paused for <host>   (menu: "Pause protection for <host>")
+
+# Internal pages, served by this build's own protocol handler:
+#   craft://welcome  -> INFO page title: "CraftBrowsing"
+#   craft://shields  -> INFO page title: "Tracking protection"
+#   craft://settings -> INFO page title: "Settings"
+#   anything else    -> INFO page title: "No such page"
+# A title line means the engine fetched the document from us and parsed it;
+# `load status: Complete` means it rendered. See docs/internal-pages.md.
 
 # Real fetch, cache, compile and block, against the live upstreams. Opt in:
 cargo test -p craft-ui --test upstream_end_to_end -- --ignored --nocapture

@@ -45,7 +45,7 @@ Load the matching skill with the `skill` tool before starting the work, not afte
 | --- | --- |
 | `craft-core` | Shared types: tabs and groups, containers, downloads, permissions |
 | `craft-engine` | Engine abstraction boundary and control plane: the `Engine` / `PageController` traits, `TabEngine` tab records and the event stream, plus the feature-gated Servo page backend (`servo_backend`, enabled with `--features servo`). Window creation, the GL context and page painting stay in `craft-ui::window` until Phase 2b. The Blink/CEF backend is planned |
-| `craft-ui` | Browser chrome: window, omnibox, tab manager, settings surface |
+| `craft-ui` | Browser chrome: window and paint, omnibox, tab manager, the `craft://` internal pages, and the engine request hook where tracking protection is enforced |
 | `craft-storage` | SQLite layer: containers, downloads, permissions, privacy settings |
 | `craft-adblock` | Filter-list parsing and request matching; enforcement is the engine hook `WebViewDelegate::load_web_resource` in `craft-ui::window` |
 | `craft-sync` | E2EE sync: crypto, protocol, dormant until enabled |
