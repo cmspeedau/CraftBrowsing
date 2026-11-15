@@ -1,5 +1,6 @@
 //! Browser shell UI and main application entrypoint for CraftBrowsing.
 
+pub mod internal;
 pub mod lists;
 pub mod omnibox;
 pub mod shields;
@@ -7,7 +8,7 @@ pub mod tab_manager;
 pub mod window;
 
 use craft_adblock::AdblockManager;
-use craft_adblock::upstream::{DEFAULT_SOURCES, ListStore, SourceAction};
+use craft_adblock::upstream::{DEFAULT_SOURCES, FilterSource, ListStore, SourceAction};
 use craft_core::container::{Container, ContainerId};
 use craft_core::media::{MediaAction, MediaHub, MediaSessionEvent, MediaSessionId};
 use craft_core::tab::{Tab, TabGroup, TabId};
@@ -18,7 +19,9 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use tracing::{info, warn};
 
+use crate::internal::{GroupStatus, ShieldStatus, SourceInfo, StatusHandle, new_handle};
 use crate::lists::UpdateEvent;
+use crate::shields::host_of;
 
 pub use omnibox::{OmniboxState, OmniboxTarget};
 pub use shields::ShieldStats;
@@ -39,6 +42,9 @@ pub struct BrowserApp {
     pending_lists: Vec<SourceAction>,
     /// Outcome lines from the most recent update pass, newest last.
     list_log: Vec<String>,
+    /// Snapshot the internal `craft://` pages render from. The engine's protocol
+    /// handler reads it on its own thread, so it is plain data behind a mutex.
+    pub internal_status: StatusHandle,
     pub sync_preferences: SyncPreferences,
     pub tabs: Vec<Tab>,
     pub active_tab_id: Option<TabId>,
@@ -70,6 +76,7 @@ impl BrowserApp {
         // again every session.
         let list_store = ListStore::new(filter_list_dir());
         install_cached_lists(&adblock, &list_store);
+        let internal_status = new_handle();
         let sync_preferences = SyncPreferences::default();
         let omnibox = OmniboxState::new("", ContainerId::default_container());
         let tab_manager = VerticalTabManager::new();
@@ -124,11 +131,12 @@ impl BrowserApp {
             ServoPageController::new(page_slot.clone()),
         ));
 
-        Self {
+        let mut app = Self {
             adblock,
             shields,
             list_store,
             list_updates: None,
+            internal_status: internal_status.clone(),
             pending_lists: Vec::new(),
             list_log: Vec::new(),
             sync_preferences,
@@ -141,7 +149,9 @@ impl BrowserApp {
             omnibox,
             tab_manager,
             media_hub,
-        }
+        };
+        app.publish_shield_status();
+        app
     }
 
     /// The handle the window publishes its live page into.
@@ -175,6 +185,7 @@ impl BrowserApp {
 
     pub fn set_adblock_enabled(&mut self, enabled: bool) {
         self.adblock.set_enabled(enabled);
+        self.publish_shield_status();
     }
 
     /// How many rules the matcher has compiled. Shown in the menu so the shield
@@ -345,6 +356,7 @@ impl BrowserApp {
         match finished {
             Some((updated, unchanged, failed)) => {
                 let rules = self.apply_pending_lists();
+                self.publish_shield_status();
                 self.push_list_log(format!(
                     "pass finished: {updated} updated, {unchanged} unchanged, {failed} failed; {rules} rules compiled"
                 ));
@@ -430,6 +442,10 @@ impl BrowserApp {
     /// chrome. Nothing here assumes a load succeeded.
     pub fn poll_engine_events(&mut self) -> Vec<EngineEvent> {
         let events = self.engine.poll_events();
+        if !events.is_empty() {
+            // Page state moved, so the internal pages may be stale.
+            self.publish_shield_status();
+        }
         for event in &events {
             let EngineEvent::Navigation(nav) = event;
             self.tab_manager.update_tab_url(&nav.tab_id, &nav.url);
@@ -444,6 +460,73 @@ impl BrowserApp {
             }
         }
         events
+    }
+
+    // -- Per-site shield control and the internal pages -------------------------
+
+    /// Host of the page in the active tab, if the engine has reported a URL for it.
+    pub fn active_host(&self) -> Option<String> {
+        let id = self.active_tab_id.as_ref()?;
+        host_of(&self.engine.page_snapshot(id)?.url)
+    }
+
+    /// Is protection paused for the site in the active tab?
+    pub fn active_site_paused(&self) -> bool {
+        self.active_host()
+            .is_some_and(|host| self.adblock.is_site_exempted(&host))
+    }
+
+    /// Pause or resume filtering for the site in the active tab. Returns the new
+    /// paused state, or `None` when the page has no host to act on (internal
+    /// pages, `about:blank`, or no page at all).
+    pub fn toggle_site_pause(&mut self) -> Option<bool> {
+        let host = self.active_host()?;
+        let paused = if self.adblock.is_site_exempted(&host) {
+            self.adblock.remove_site_exception(&host);
+            false
+        } else {
+            self.adblock.add_site_exception(&host);
+            true
+        };
+        info!(
+            "shields: protection {} for {host}",
+            if paused { "paused" } else { "resumed" }
+        );
+        self.publish_shield_status();
+        Some(paused)
+    }
+
+    /// Republish the snapshot the `craft://` pages render from.
+    ///
+    /// Cheap, and deliberately whole-snapshot rather than per field: the pages
+    /// would otherwise show a mix of "before" and "after" values whenever only one
+    /// kind of change triggered a publish.
+    pub fn publish_shield_status(&mut self) {
+        let groups = self
+            .adblock
+            .group_summaries()
+            .into_iter()
+            .map(|group| GroupStatus {
+                title: group.title,
+                rules: group.accepted,
+                rejected: group.rejected,
+                age: age_label(group.updated_unix),
+                source: source_attribution(&group.id),
+            })
+            .collect();
+
+        let status = ShieldStatus {
+            enabled: self.adblock.is_enabled(),
+            page_exempt: self.active_site_paused(),
+            active_host: self.active_host().unwrap_or_default(),
+            blocked: self.shields.blocked(),
+            groups,
+            exceptions: self.adblock.site_exceptions(),
+            last_pass: self.list_log.clone(),
+            lists_dir: self.list_store.dir().display().to_string(),
+            rule_total: self.adblock.rule_count(),
+        };
+        internal::publish(&self.internal_status, status);
     }
 
     // -- Global Media Hub -------------------------------------------------
@@ -609,6 +692,18 @@ fn uuid_v4_stub() -> String {
 /// Where cached filter lists live: the platform data directory, with the temp
 /// directory as a last resort. These files are a cache, not user state, so
 /// losing them costs nothing but the next manual update.
+/// Licence and homepage for a downloaded list, taken from the same descriptor the
+/// updater uses, so a page cannot advertise a source the code does not have.
+fn source_attribution(group_id: &str) -> Option<SourceInfo> {
+    DEFAULT_SOURCES
+        .iter()
+        .find(|source| source.id == group_id)
+        .map(|source: &FilterSource| SourceInfo {
+            homepage: source.homepage.to_string(),
+            licence: source.licence.to_string(),
+        })
+}
+
 /// Where this build keeps its downloaded filter lists, so the location is citable
 /// from docs, tests and diagnostics.
 pub fn filter_list_dir() -> PathBuf {

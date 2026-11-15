@@ -23,11 +23,17 @@ use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::BrowserApp;
+use crate::internal::{self, SHIELDS_URL, WELCOME_URL};
 use crate::omnibox::{OmniboxState, OmniboxTarget};
 use crate::shields::{ShieldStats, adblock_request_type};
 use craft_adblock::AdblockManager;
 use craft_core::container::ContainerId;
 use craft_core::media::MediaAction;
+
+/// Where a new tab starts. Served by the internal protocol handler, so unlike
+/// `about:blank` it has something to show and a URL worth putting in history.
+/// Also a page worth having: it states what the browser does and does not do.
+const START_PAGE: &str = WELCOME_URL;
 
 /// Custom user event used to wake the Servo event loop.
 #[derive(Debug)]
@@ -57,19 +63,24 @@ impl WebViewDelegate for BrowserWebViewDelegate {
         self.window.request_redraw();
     }
 
-    fn load_web_resource(&self, _: WebView, load: WebResourceLoad) {
+    fn load_web_resource(&self, webview: WebView, load: WebResourceLoad) {
         // Servo calls this for every HTTP(S) resource the page asks for.
         // Dropping `load` unanswered means "do not intercept", so an allowed
         // request costs one rule lookup and nothing else.
         let (url, source, kind, is_main_frame) = {
             let request = load.request();
+            // The *page* URL is what the filter syntax means by source: it drives
+            // `$domain=` rules and the per-site pause. The referrer is only a
+            // fallback, because a page with `Referrer-Policy: no-referrer` sends
+            // none and would silently escape its own exception.
+            let page_url = webview
+                .url()
+                .map(|page| page.to_string())
+                .or_else(|| request.referrer_url.as_ref().map(|u| u.to_string()))
+                .unwrap_or_default();
             (
                 request.url.clone(),
-                request
-                    .referrer_url
-                    .as_ref()
-                    .map(|url| url.as_str().to_string())
-                    .unwrap_or_default(),
+                page_url,
                 adblock_request_type(&request.destination),
                 request.is_for_main_frame,
             )
@@ -285,9 +296,14 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
             temporary_storage: true,
             ..Default::default()
         };
+        // `craft://welcome` and friends are served by us, so they need a protocol
+        // handler; without one those URLs are a failed load.
+        let protocol_registry = internal::CraftPages::registry(self.app.internal_status.clone());
+
         let servo = ServoBuilder::default()
             .opts(opts)
             .event_loop_waker(Box::new(waker))
+            .protocol_registry(protocol_registry)
             .build();
 
         // The webview renders into its own offscreen context, sized to the
@@ -519,7 +535,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                         .clicked()
                                     {
                                         app.open_tab(
-                                            "about:blank",
+                                            START_PAGE,
                                             ContainerId::default_container(),
                                         );
                                     }
@@ -603,7 +619,12 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                         (ui.available_width() - right_reserve - pill_chrome)
                                             .max(140.0);
                                     let protected_now = app.adblock_enabled();
-                                    let shield = if protected_now { "🛡" } else { "⚠" };
+                                    let site_paused = app.active_site_paused();
+                                    let shield = match (protected_now, site_paused) {
+                                        (true, false) => "🛡",
+                                        (true, true) => "🛡̸",
+                                        (false, _) => "⚠",
+                                    };
                                     egui::Frame::new()
                                         .fill(hex("#f0f0f4"))
                                         .corner_radius(egui::CornerRadius::same(17))
@@ -765,7 +786,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                 .show(ui.ctx(), |ui| {
                                     if ui.button("New Tab").clicked() {
                                         app.open_tab(
-                                            "about:blank",
+                                            START_PAGE,
                                             ContainerId::default_container(),
                                         );
                                         *menu_open = false;
@@ -791,7 +812,7 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                             ui.button(name).clicked()
                                         });
                                         if row.inner {
-                                            app.open_tab("about:blank", c.id.clone());
+                                            app.open_tab(START_PAGE, c.id.clone());
                                             *menu_open = false;
                                         }
                                     }
@@ -808,6 +829,56 @@ impl ApplicationHandler<WakerEvent> for BrowserWindowApp {
                                         app.set_adblock_enabled(on);
                                         *menu_open = false;
                                     }
+                                    // Per-site control. The matcher already honoured
+                                    // site exceptions; this is the chrome half that
+                                    // lets a user reach them, which is what a false
+                                    // positive (the upstream lists refuse AWS WAF
+                                    // tokens, for example) actually needs.
+                                    ui.separator();
+                                    match app.active_host() {
+                                        Some(host) => {
+                                            let paused = app.active_site_paused();
+                                            let label = if paused {
+                                                format!("Resume protection for {host}")
+                                            } else {
+                                                format!("Pause protection for {host}")
+                                            };
+                                            if ui.button(label).clicked()
+                                                && let Some(paused) = app.toggle_site_pause()
+                                            {
+                                                info!(
+                                                    "shields: protection {} for {host}",
+                                                    if paused { "paused" } else { "resumed" }
+                                                );
+                                            }
+                                            if ui.button("Open tracking protection status").clicked() {
+                                                let target = SHIELDS_URL;
+                                                if let Some(id) = app.active_tab_id.clone() {
+                                                    app.navigate_tab(&id, target);
+                                                } else {
+                                                    app.open_tab(target, ContainerId::default_container());
+                                                }
+                                                *menu_open = false;
+                                            }
+                                        }
+                                        None => {
+                                            ui.label(
+                                                egui::RichText::new(
+                                                    "No page is open, so there is no site to pause protection for.",
+                                                )
+                                                .weak()
+                                                .size(12.0),
+                                            );
+                                            if ui.button("Open tracking protection status").clicked() {
+                                                app.open_tab(
+                                                    SHIELDS_URL,
+                                                    ContainerId::default_container(),
+                                                );
+                                                *menu_open = false;
+                                            }
+                                        }
+                                    }
+
                                     // The shield is a claim, so the menu shows
                                     // what is behind it: every loaded rule group,
                                     // what each last did, and the real blocks this
@@ -919,13 +990,10 @@ impl BrowserWindowApp {
         }
         match &event.logical_key {
             Key::Character(c) if c.to_ascii_lowercase() == "t" => {
-                // `about:blank` rather than `craft://welcome`: internal pages
-                // are not registered with the engine, so that URL would open as
-                // a failed load. Roadmap item, not a placeholder to keep.
                 info!("Shortcut: New Tab");
                 let tab_id = self
                     .app
-                    .open_tab("about:blank", ContainerId::default_container());
+                    .open_tab(START_PAGE, ContainerId::default_container());
                 info!("Created tab: {:?}", tab_id);
             }
             Key::Character(c) if c.to_ascii_lowercase() == "w" => {
@@ -955,13 +1023,19 @@ impl BrowserWindowApp {
 /// instead of asserting protection: rules compiled at startup and requests the
 /// engine's resource hook has refused this session.
 fn shield_tooltip(app: &BrowserApp) -> String {
-    let state = if app.adblock_enabled() {
-        "ON"
+    let state = if !app.adblock_enabled() {
+        "OFF everywhere (click to enable)".to_string()
+    } else if let Some(host) = app
+        .active_site_paused()
+        .then(|| app.active_host())
+        .flatten()
+    {
+        format!("ON, paused for {host} (click to pause or resume everywhere)")
     } else {
-        "PAUSED (click to enable)"
+        "ON (click to pause everywhere)".to_string()
     };
     format!(
-        "Tracking protection {state} - {} rules, {} requests blocked this session",
+        "Tracking protection {state} - {} rules, {} requests refused this session",
         app.filter_rule_count(),
         app.blocked_requests()
     )

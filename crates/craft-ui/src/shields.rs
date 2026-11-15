@@ -10,8 +10,28 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use url::Url;
+
 use content_security_policy::Destination;
 use craft_adblock::{DOCUMENT, FONT, IMAGE, MEDIA, OTHER, PING, SCRIPT, STYLESHEET, SUBDOCUMENT};
+
+/// Host of a page URL, for asking the matcher about a site rather than a request.
+///
+/// Empty or unparsable URLs (including `about:blank`, `craft://` pages and data
+/// URLs) have no host worth pausing on, so they yield `None` rather than a string
+/// that would match nothing.
+pub fn host_of(url: &str) -> Option<String> {
+    if url.is_empty() {
+        return None;
+    }
+    let parsed = Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_ascii_lowercase())
+    }
+}
 
 /// Session counters shared between the engine delegate (which sees every
 /// request) and the chrome (which reports them). `Arc` because the delegate is
@@ -125,6 +145,22 @@ mod tests {
         assert_eq!(adblock_request_type(&Destination::IFrame), SUBDOCUMENT);
         assert_eq!(adblock_request_type(&Destination::Image), IMAGE);
         assert_eq!(adblock_request_type(&Destination::Document), DOCUMENT);
+    }
+
+    #[test]
+    fn only_real_pages_have_a_host_to_pause_on() {
+        assert_eq!(
+            host_of("https://News.Example.ORG/article?x=1").as_deref(),
+            Some("news.example.org")
+        );
+        assert_eq!(
+            host_of("http://localhost:8080/").as_deref(),
+            Some("localhost")
+        );
+        assert_eq!(host_of(""), None);
+        assert_eq!(host_of("not a url"), None);
+        assert_eq!(host_of("about:blank"), None);
+        assert_eq!(host_of("data:text/html,hi"), None);
     }
 
     #[test]
